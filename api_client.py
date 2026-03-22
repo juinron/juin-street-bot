@@ -4,6 +4,8 @@ import time
 import hmac
 import hashlib
 import logging
+from typing import Optional, Tuple
+
 import requests
 from functools import wraps
 
@@ -40,7 +42,7 @@ class RoostooClient:
     def _timestamp(self) -> str:
         return str(int(time.time() * 1000))
 
-    def _sign(self, params: dict) -> tuple[dict, dict, str]:
+    def _sign(self, params: dict) -> Tuple[dict, dict, str]:
         """Sign params with HMAC-SHA256. Returns (headers, params, total_params_string)."""
         params["timestamp"] = self._timestamp()
         sorted_keys = sorted(params.keys())
@@ -61,19 +63,19 @@ class RoostooClient:
     # ── Public endpoints (no signing) ──
 
     @retry
-    def get_server_time(self) -> dict | None:
+    def get_server_time(self) -> Optional[dict]:
         res = requests.get(f"{self.base_url}/v3/serverTime", timeout=10)
         res.raise_for_status()
         return res.json()
 
     @retry
-    def get_exchange_info(self) -> dict | None:
+    def get_exchange_info(self) -> Optional[dict]:
         res = requests.get(f"{self.base_url}/v3/exchangeInfo", timeout=10)
         res.raise_for_status()
         return res.json()
 
     @retry
-    def get_ticker(self, pair: str = None) -> dict | None:
+    def get_ticker(self, pair: str = None) -> Optional[dict]:
         """Fetch market ticker. If pair is None, returns all pairs."""
         params = {"timestamp": self._timestamp()}
         if pair:
@@ -85,7 +87,7 @@ class RoostooClient:
     # ── Signed endpoints ──
 
     @retry
-    def get_balance(self) -> dict | None:
+    def get_balance(self) -> Optional[dict]:
         headers, params, _ = self._sign({})
         res = requests.get(
             f"{self.base_url}/v3/balance", headers=headers, params=params, timeout=10
@@ -94,7 +96,7 @@ class RoostooClient:
         return res.json()
 
     @retry
-    def get_pending_count(self) -> dict | None:
+    def get_pending_count(self) -> Optional[dict]:
         headers, params, _ = self._sign({})
         res = requests.get(
             f"{self.base_url}/v3/pending_count", headers=headers, params=params, timeout=10
@@ -106,7 +108,7 @@ class RoostooClient:
     def place_order(
         self, pair: str, side: str, quantity: float,
         price: float = None, order_type: str = None
-    ) -> dict | None:
+    ) -> Optional[dict]:
         """Place a LIMIT or MARKET order."""
         if order_type is None:
             order_type = "LIMIT" if price is not None else "MARKET"
@@ -133,7 +135,7 @@ class RoostooClient:
     @retry
     def query_order(
         self, order_id: int = None, pair: str = None, pending_only: bool = None
-    ) -> dict | None:
+    ) -> Optional[dict]:
         """Query order history or specific orders."""
         payload = {}
         if order_id is not None:
@@ -155,7 +157,7 @@ class RoostooClient:
         return res.json()
 
     @retry
-    def cancel_order(self, order_id: int = None, pair: str = None) -> dict | None:
+    def cancel_order(self, order_id: int = None, pair: str = None) -> Optional[dict]:
         """Cancel specific order, all orders for a pair, or all pending orders."""
         payload = {}
         if order_id is not None:
