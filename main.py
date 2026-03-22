@@ -1,7 +1,9 @@
 """Entry point — initializes all components, runs first cycle, starts scheduler."""
 
+import os
 import signal
 import sys
+import time
 import logging
 
 from logger import setup_console_logging, TradeLogger, PortfolioLogger
@@ -12,8 +14,13 @@ from scheduler import create_scheduler, signal_loop
 
 log = logging.getLogger(__name__)
 
+# Flag to prevent double-shutdown on Ctrl+C
+_shutting_down = False
+
 
 def main():
+    global _shutting_down
+
     setup_console_logging()
     log.info("Juin Street Bot starting up...")
 
@@ -47,21 +54,30 @@ def main():
     scheduler.start()
     log.info("Scheduler started — signal loop every 2h, rebalance daily at 09:00 UTC")
 
-    # Graceful shutdown handler
+    # Graceful shutdown handler (guarded against double-trigger)
     def shutdown(signum, frame):
+        global _shutting_down
+        if _shutting_down:
+            return
+        _shutting_down = True
+
         log.info("Shutdown signal received — saving state and stopping...")
         pm.save_state()
-        scheduler.shutdown(wait=False)
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
-    signal.signal(signal.SIGTERM, shutdown)
+    # SIGTERM is not available on Windows
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, shutdown)
 
     # Block main thread
     log.info("Bot is running. Press Ctrl+C to stop.")
     try:
         while True:
-            import time
             time.sleep(60)
     except (KeyboardInterrupt, SystemExit):
         shutdown(None, None)

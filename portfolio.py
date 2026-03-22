@@ -59,17 +59,20 @@ class PortfolioManager:
         """
         balance_data = client.get_balance()
         if not balance_data or not balance_data.get("Success"):
-            log.error("Failed to fetch balance")
+            log.error(f"Failed to fetch balance: {balance_data}")
             return {}
 
         wallet = balance_data.get("Wallet", {})
         usd_cash = wallet.get("USD", {}).get("Free", 0)
+        log.debug(f"Wallet data: {wallet}")
 
         # Fetch current prices
         ticker_data = client.get_ticker()
         if not ticker_data or not ticker_data.get("Success"):
-            log.error("Failed to fetch ticker for portfolio valuation")
+            log.error(f"Failed to fetch ticker for portfolio valuation: {ticker_data}")
             return {}
+
+        log.debug(f"Ticker data keys: {list(ticker_data.get('Data', {}).keys())}")
 
         prices = {}
         asset_values = {}
@@ -88,6 +91,9 @@ class PortfolioManager:
             last_price = ticker.get("LastPrice", 0)
             prices[pair] = last_price
 
+            if not ticker:
+                log.warning(f"{pair}: not found in ticker data — pair may not be listed")
+
             value = total_coin * last_price
             asset_values[pair] = value
             total_value += value
@@ -103,6 +109,11 @@ class PortfolioManager:
         # Update peak
         if total_value > self.peak_value:
             self.peak_value = total_value
+
+        log.info(
+            f"Portfolio: ${total_value:.2f} | USD={usd_cash:.2f} | "
+            f"held={list(held_assets)} | prices={prices}"
+        )
 
         return {
             "total_value": total_value,

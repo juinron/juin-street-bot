@@ -1,6 +1,7 @@
 """Scheduler — APScheduler jobs for signal loop, daily rebalance, and midnight reset."""
 
 import logging
+import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import config
@@ -11,6 +12,9 @@ from strategy import collect_price_snapshot, compute_signal
 from logger import TradeLogger, PortfolioLogger
 
 log = logging.getLogger(__name__)
+
+# Prevents signal_loop and daily_rebalance from running simultaneously
+_trading_lock = threading.Lock()
 
 
 def cancel_stale_orders(client: RoostooClient, trade_logger: TradeLogger, portfolio_value: float):
@@ -83,6 +87,22 @@ def signal_loop(
     trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
 ):
     """Main signal loop: cancel stale orders → collect prices → evaluate signals → trade."""
+    if not _trading_lock.acquire(blocking=False):
+        log.warning("Signal loop skipped — another trading job is running")
+        return
+    try:
+        _signal_loop_inner(client, pm, rm, trade_logger, portfolio_logger)
+    except Exception as e:
+        log.error(f"Signal loop failed with unexpected error: {e}", exc_info=True)
+    finally:
+        _trading_lock.release()
+
+
+def _signal_loop_inner(
+    client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
+    trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
+):
+    """Inner signal loop logic, called with trading lock held."""
     log.info("=" * 60)
     log.info("Signal loop starting")
 
@@ -190,6 +210,22 @@ def daily_rebalance(
     trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
 ):
     """Daily rebalance at 09:00 UTC — trim/top-up positions to target allocation."""
+    if not _trading_lock.acquire(blocking=False):
+        log.warning("Daily rebalance skipped — another trading job is running")
+        return
+    try:
+        _daily_rebalance_inner(client, pm, rm, trade_logger, portfolio_logger)
+    except Exception as e:
+        log.error(f"Daily rebalance failed with unexpected error: {e}", exc_info=True)
+    finally:
+        _trading_lock.release()
+
+
+def _daily_rebalance_inner(
+    client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
+    trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
+):
+    """Inner rebalance logic, called with trading lock held."""
     log.info("Daily rebalance starting")
 
     portfolio = pm.fetch_portfolio(client)
@@ -250,12 +286,15 @@ def midnight_reset(
     portfolio_logger: PortfolioLogger,
 ):
     """Midnight UTC — reset daily loss tracking and snapshot portfolio."""
-    log.info("Midnight reset")
-    portfolio = pm.fetch_portfolio(client)
-    if portfolio:
-        pm.update_daily_close(portfolio["total_value"])
-        _log_snapshot(pm, rm, portfolio, portfolio_logger)
-    rm.reset_daily()
+    try:
+        log.info("Midnight reset")
+        portfolio = pm.fetch_portfolio(client)
+        if portfolio:
+            pm.update_daily_close(portfolio["total_value"])
+            _log_snapshot(pm, rm, portfolio, portfolio_logger)
+        rm.reset_daily()
+    except Exception as e:
+        log.error(f"Midnight reset failed: {e}", exc_info=True)
 
 
 def _log_snapshot(
