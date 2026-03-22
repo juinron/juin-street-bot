@@ -62,7 +62,7 @@ class PortfolioManager:
             log.error(f"Failed to fetch balance: {balance_data}")
             return {}
 
-        wallet = balance_data.get("Wallet", {})
+        wallet = balance_data.get("SpotWallet", balance_data.get("Wallet", {}))
         usd_cash = wallet.get("USD", {}).get("Free", 0)
         log.debug(f"Wallet data: {wallet}")
 
