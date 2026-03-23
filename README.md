@@ -4,7 +4,7 @@ An autonomous Python trading bot for the [Roostoo](https://roostoo.com) mock exc
 
 ## Strategy
 
-The bot trades **4 crypto pairs** (BTC, ETH, SOL, BNB against USD) on a **2-hour loop**:
+The bot trades **5 crypto pairs** (BTC, ETH, SOL, BNB, XRP against USD) on a **15-minute loop**:
 
 1. **Fetch market data** via Roostoo ticker API and build local price history
 2. **Calculate Bollinger Bands** (20-period SMA ± 2 std devs) and **RSI** (14-period)
@@ -28,7 +28,7 @@ Ensures each asset stays near its **22.5% target allocation**. If any position d
 | File | Description |
 |---|---|
 | `trades_log.csv` | Every trade, cancellation, and error with timestamps and reasons |
-| `portfolio_snapshots.csv` | Portfolio value breakdown every 2 hours + daily |
+| `portfolio_snapshots.csv` | Portfolio value breakdown every 15 minutes + daily |
 | `price_history.csv` | Ticker prices collected each loop (feeds strategy calculations) |
 | `state.json` | Persisted bot state (entry prices, peak value) for crash recovery |
 
@@ -52,7 +52,7 @@ All tunable parameters are in [`config.py`](config.py) — adjust without touchi
 | `TARGET_ALLOCATION_PCT` | 22.5% | Target allocation per asset |
 | `CASH_BUFFER_PCT` | 10% | Minimum USD cash reserve |
 | `STOP_LOSS_PCT` | 4% | Per-trade stop-loss threshold |
-| `SIGNAL_LOOP_HOURS` | 2 | Hours between signal evaluations |
+| `SIGNAL_LOOP_MINUTES` | 15 | Minutes between signal evaluations |
 
 ## Architecture
 

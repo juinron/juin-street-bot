@@ -11,7 +11,7 @@ API_SECRET = os.getenv("API_SECRET", "")
 BASE_URL = "https://mock-api.roostoo.com"
 
 # Traded pairs (Roostoo uses COIN/USD format)
-ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD"]
+ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD"]
 
 # Bollinger Band parameters
 BB_PERIOD = 20
@@ -35,7 +35,7 @@ DAILY_LOSS_LIMIT_PCT = 0.05        # no buys if down 5% vs yesterday close
 MAX_DRAWDOWN_PCT = 0.15            # halt all trading if 15% below peak
 
 # Scheduling
-SIGNAL_LOOP_HOURS = 1         # run signal loop every 1 hour
+SIGNAL_LOOP_MINUTES = 15     # run signal loop every 15 minutes
 DAILY_REBALANCE_HOUR = 9      # rebalance at 09:00 UTC
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
@@ -49,7 +49,7 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "1h"  # matches SIGNAL_LOOP_HOURS
+CANDLE_INTERVAL = "15m"  # matches SIGNAL_LOOP_MINUTES
 CANDLE_BOOTSTRAP_COUNT = 50  # candles to fetch on startup (BB_PERIOD=20 + buffer)
 
 # Map Roostoo pairs → Binance symbols (Roostoo uses /USD, Binance uses USDT)
@@ -58,6 +58,7 @@ BINANCE_SYMBOL_MAP = {
     "ETH/USD": "ETHUSDT",
     "SOL/USD": "SOLUSDT",
     "BNB/USD": "BNBUSDT",
+    "XRP/USD": "XRPUSDT",
 }
 
 # File paths
