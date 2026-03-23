@@ -14,11 +14,11 @@ log = logging.getLogger(__name__)
 
 
 def bootstrap_price_history(client) -> None:
-    """Fetch historical 2h candles from Binance and seed price_history.csv.
+    """Fetch historical candles from Binance and seed price_history.csv.
 
     Called once on startup so the strategy has enough data points
     (BB_PERIOD=20) to immediately generate signals without waiting
-    40 hours to accumulate snapshots.
+    for additional snapshots to accumulate.
 
     Args:
         client: RoostooClient instance (used for its get_klines method).

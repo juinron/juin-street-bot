@@ -398,7 +398,7 @@ def create_scheduler(
     """Create and configure the APScheduler with all jobs."""
     scheduler = BackgroundScheduler(timezone="UTC")
 
-    # Job 1: Signal loop every 2 hours
+    # Job 1: Signal loop every config.SIGNAL_LOOP_HOURS hours
     scheduler.add_job(
         signal_loop,
         "interval",

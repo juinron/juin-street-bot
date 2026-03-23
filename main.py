@@ -6,6 +6,7 @@ import sys
 import time
 import logging
 
+import config
 from logger import setup_console_logging, TradeLogger, PortfolioLogger
 from api_client import RoostooClient
 from portfolio import PortfolioManager
@@ -56,7 +57,11 @@ def main():
     # Set up scheduler
     scheduler = create_scheduler(client, pm, rm, trade_logger, portfolio_logger)
     scheduler.start()
-    log.info("Scheduler started — signal loop every 2h, rebalance daily at 09:00 UTC")
+    log.info(
+        "Scheduler started — signal loop every "
+        f"{config.SIGNAL_LOOP_HOURS}h, rebalance daily at "
+        f"{config.DAILY_REBALANCE_HOUR:02d}:00 UTC"
+    )
 
     # Graceful shutdown handler (guarded against double-trigger)
     def shutdown(signum, frame):

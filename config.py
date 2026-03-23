@@ -35,7 +35,7 @@ DAILY_LOSS_LIMIT_PCT = 0.05        # no buys if down 5% vs yesterday close
 MAX_DRAWDOWN_PCT = 0.15            # halt all trading if 15% below peak
 
 # Scheduling
-SIGNAL_LOOP_HOURS = 2         # run signal loop every 2 hours
+SIGNAL_LOOP_HOURS = 1         # run signal loop every 1 hour
 DAILY_REBALANCE_HOUR = 9      # rebalance at 09:00 UTC
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
@@ -49,7 +49,7 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "2h"  # matches SIGNAL_LOOP_HOURS
+CANDLE_INTERVAL = "1h"  # matches SIGNAL_LOOP_HOURS
 CANDLE_BOOTSTRAP_COUNT = 50  # candles to fetch on startup (BB_PERIOD=20 + buffer)
 
 # Map Roostoo pairs → Binance symbols (Roostoo uses /USD, Binance uses USDT)
