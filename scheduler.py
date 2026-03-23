@@ -47,8 +47,12 @@ def cancel_stale_orders(client: RoostooClient, trade_logger: TradeLogger, portfo
 
 
 def execute_stop_losses(
-    client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
-    portfolio: dict, trade_logger: TradeLogger,
+    client: RoostooClient,
+    pm: PortfolioManager,
+    rm: RiskManager,
+    portfolio: dict,
+    trade_logger: TradeLogger,
+    pair_rules: dict,
 ):
     """Check all held positions for stop-loss triggers and execute market sells."""
     for pair in config.ASSETS:
@@ -62,8 +66,21 @@ def execute_stop_losses(
             quantity = portfolio["balances"].get(coin, 0)
             if quantity <= 0:
                 continue
+            amount_precision = pair_rules.get(pair, {}).get("amount_precision", 6)
+            quantity = pm.floor_to_precision(quantity, int(amount_precision))
+            if quantity <= 0:
+                continue
 
-            result = client.place_order(pair, "SELL", quantity, order_type="MARKET")
+            mini_order = float(pair_rules.get(pair, {}).get("mini_order", 0) or 0)
+            if mini_order and (quantity * price) < mini_order:
+                continue
+
+            result = client.place_order(
+                pair,
+                "SELL",
+                quantity,
+                order_type="MARKET",
+            )
             if result and result.get("Success"):
                 detail = result.get("OrderDetail", {})
                 trade_logger.log(
@@ -126,8 +143,11 @@ def _signal_loop_inner(
     # Collect price snapshot for strategy history
     collect_price_snapshot(client)
 
+    # Fetch precision rules once per run (cached inside PortfolioManager)
+    pair_rules = pm.get_pair_rules(client)
+
     # Execute stop-losses first
-    execute_stop_losses(client, pm, rm, portfolio, trade_logger)
+    execute_stop_losses(client, pm, rm, portfolio, trade_logger, pair_rules)
 
     # Re-fetch portfolio after any stop-loss sells
     portfolio = pm.fetch_portfolio(client)
@@ -136,6 +156,7 @@ def _signal_loop_inner(
     total_value = portfolio["total_value"]
 
     # Evaluate signals for each asset
+    available_usd = max(0.0, portfolio["usd_cash"] - (total_value * config.CASH_BUFFER_PCT))
     for pair in config.ASSETS:
         coin = pair.split("/")[0]
         signal = compute_signal(pair, portfolio["held_assets"])
@@ -145,18 +166,39 @@ def _signal_loop_inner(
             continue
 
         if signal == "BUY" and rm.can_buy(total_value):
-            quantity = pm.calculate_buy_quantity(pair, price, portfolio)
-            if quantity <= 0:
+            buy_qty, spend_used = pm.calculate_buy_quantity(
+                pair, price, portfolio, available_usd=available_usd
+            )
+            if buy_qty <= 0 or spend_used <= 0:
                 continue
 
-            limit_price = round(price * config.BUY_LIMIT_OFFSET, 4)
-            result = client.place_order(pair, "BUY", round(quantity, 6), price=limit_price)
+            rules = pair_rules.get(pair, {})
+            price_precision = rules.get("price_precision", 4)
+            amount_precision = rules.get("amount_precision", 6)
+            limit_price = pm.floor_to_precision(price * config.BUY_LIMIT_OFFSET, int(price_precision))
+            quantity = pm.floor_to_precision(buy_qty, int(amount_precision))
+
+            if limit_price <= 0 or quantity <= 0:
+                continue
+
+            # Ensure we don't violate the exchange minimum order value (if provided).
+            mini_order = float(rules.get("mini_order", 0) or 0)
+            if mini_order and (quantity * limit_price) < mini_order:
+                continue
+
+            result = client.place_order(
+                pair,
+                "BUY",
+                quantity,
+                price=limit_price,
+                order_type="LIMIT",
+            )
 
             if result and result.get("Success"):
                 detail = result.get("OrderDetail", {})
                 trade_logger.log(
                     asset=pair, action="BUY", order_type="LIMIT",
-                    quantity=round(quantity, 6), price=limit_price,
+                    quantity=quantity, price=limit_price,
                     order_id=str(detail.get("OrderID", "")),
                     status=detail.get("Status", ""),
                     reason="BB+RSI buy signal",
@@ -166,6 +208,11 @@ def _signal_loop_inner(
                 if detail.get("Status") == "FILLED":
                     filled_price = detail.get("FilledAverPrice", limit_price)
                     pm.record_entry(coin, filled_price)
+                    # Note: we already reserved cash with a conservative limit_cost.
+
+                # Reserve cash for the order so later BUYs in this loop can't overdraft.
+                # (Maker orders should lock funds at/under the limit price.)
+                available_usd = max(0.0, available_usd - (quantity * limit_price))
             else:
                 trade_logger.log(
                     asset=pair, action="ERROR", reason="Buy order failed",
@@ -177,14 +224,32 @@ def _signal_loop_inner(
             if quantity <= 0:
                 continue
 
-            limit_price = round(price * config.SELL_LIMIT_OFFSET, 4)
-            result = client.place_order(pair, "SELL", round(quantity, 6), price=limit_price)
+            rules = pair_rules.get(pair, {})
+            price_precision = rules.get("price_precision", 4)
+            amount_precision = rules.get("amount_precision", 6)
+            limit_price = pm.floor_to_precision(price * config.SELL_LIMIT_OFFSET, int(price_precision))
+            quantity = pm.floor_to_precision(quantity, int(amount_precision))
+
+            if limit_price <= 0 or quantity <= 0:
+                continue
+
+            mini_order = float(rules.get("mini_order", 0) or 0)
+            if mini_order and (quantity * limit_price) < mini_order:
+                continue
+
+            result = client.place_order(
+                pair,
+                "SELL",
+                quantity,
+                price=limit_price,
+                order_type="LIMIT",
+            )
 
             if result and result.get("Success"):
                 detail = result.get("OrderDetail", {})
                 trade_logger.log(
                     asset=pair, action="SELL", order_type="LIMIT",
-                    quantity=round(quantity, 6), price=limit_price,
+                    quantity=quantity, price=limit_price,
                     order_id=str(detail.get("OrderID", "")),
                     status=detail.get("Status", ""),
                     reason="BB+RSI sell signal",
@@ -238,14 +303,22 @@ def _daily_rebalance_inner(
         return
 
     trades = pm.calculate_rebalance_trades(portfolio)
+    pair_rules = pm.get_pair_rules(client)
 
     for trade in trades:
         pair = trade["pair"]
         side = trade["side"]
-        quantity = round(trade["quantity"], 6)
-        price = round(trade["price"], 4)
+        rules = pair_rules.get(pair, {})
+        price_precision = rules.get("price_precision", 4)
+        amount_precision = rules.get("amount_precision", 6)
+        quantity = pm.floor_to_precision(trade["quantity"], int(amount_precision))
+        price = pm.floor_to_precision(trade["price"], int(price_precision))
 
         if quantity <= 0:
+            continue
+
+        mini_order = float(rules.get("mini_order", 0) or 0)
+        if price <= 0 or (mini_order and (quantity * price) < mini_order):
             continue
 
         # Respect risk gates for buys
@@ -253,7 +326,13 @@ def _daily_rebalance_inner(
             log.info(f"Rebalance BUY for {pair} blocked by risk gate")
             continue
 
-        result = client.place_order(pair, side, quantity, price=price)
+        result = client.place_order(
+            pair,
+            side,
+            quantity,
+            price=price,
+            order_type="LIMIT",
+        )
         if result and result.get("Success"):
             detail = result.get("OrderDetail", {})
             trade_logger.log(

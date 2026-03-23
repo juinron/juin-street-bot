@@ -3,6 +3,9 @@
 import json
 import os
 import logging
+import time
+from decimal import Decimal, ROUND_DOWN
+from typing import Tuple
 
 import config
 
@@ -17,7 +20,40 @@ class PortfolioManager:
         self.starting_value = 0  # set on first run
         self.peak_value = 0      # track peak for max drawdown
         self.yesterday_close = 0 # daily close for daily loss limit
+        self._pair_rules = {}     # {pair: {"price_precision", "amount_precision", "mini_order"}}
+        self._pair_rules_ts = 0.0 # last exchangeInfo refresh time
         self._load_state()
+
+    def get_pair_rules(self, client, refresh_after_seconds: float = 3600) -> dict:
+        """Fetch and cache per-pair precision rules from exchangeInfo."""
+        now = time.time()
+        if self._pair_rules and (now - self._pair_rules_ts) < refresh_after_seconds:
+            return self._pair_rules
+
+        info = client.get_exchange_info()
+        pair_rules = {}
+        if info and info.get("TradePairs"):
+            for pair, details in info["TradePairs"].items():
+                pair_rules[pair] = {
+                    "price_precision": int(details.get("PricePrecision", 4)),
+                    "amount_precision": int(details.get("AmountPrecision", 6)),
+                    "mini_order": float(details.get("MiniOrder", 0) or 0),
+                }
+
+        self._pair_rules = pair_rules
+        self._pair_rules_ts = now
+        return self._pair_rules
+
+    @staticmethod
+    def floor_to_precision(value: float, precision: int) -> float:
+        """Round down to a fixed decimal precision (safe for step sizes)."""
+        if precision is None:
+            return float(value)
+        if precision < 0:
+            return float(value)
+        d = Decimal(str(value))
+        quant = Decimal("1").scaleb(-precision)  # 10 ** (-precision)
+        return float(d.quantize(quant, rounding=ROUND_DOWN))
 
     def _load_state(self):
         """Restore state from state.json if it exists."""
@@ -132,9 +168,17 @@ class PortfolioManager:
         return portfolio.get("asset_values", {}).get(pair, 0) / total
 
     def calculate_buy_quantity(
-        self, pair: str, price: float, portfolio: dict
-    ) -> float:
-        """How much to buy to reach target allocation, respecting cash buffer."""
+        self,
+        pair: str,
+        price: float,
+        portfolio: dict,
+        available_usd: float = None,
+    ) -> Tuple[float, float]:
+        """
+        How much to buy to reach target allocation, respecting cash buffer.
+
+        Returns: (quantity, spend_used_usd)
+        """
         total = portfolio["total_value"]
         usd_cash = portfolio["usd_cash"]
 
@@ -143,18 +187,18 @@ class PortfolioManager:
         spend = target_usd - current_value
 
         if spend <= 0:
-            return 0
+            return 0, 0
 
-        # Respect cash buffer
+        # Respect cash buffer (optionally override with a shared "remaining cash" during a run)
         min_cash = total * config.CASH_BUFFER_PCT
-        available = usd_cash - min_cash
+        available = (available_usd if available_usd is not None else (usd_cash - min_cash))
         if available <= 0:
             log.info(f"Cash buffer would be breached, skipping buy for {pair}")
-            return 0
+            return 0, 0
 
-        spend = min(spend, available)
-        quantity = spend / price if price > 0 else 0
-        return quantity
+        spend_used = min(spend, available)
+        quantity = spend_used / price if price > 0 else 0
+        return quantity, spend_used
 
     def calculate_rebalance_trades(self, portfolio: dict) -> list:
         """Compare actual vs target allocations, return needed trades.
@@ -164,6 +208,10 @@ class PortfolioManager:
         total = portfolio["total_value"]
         if total <= 0:
             return trades
+
+        # Track remaining USD across multiple BUY trades in this same rebalance run.
+        min_cash = total * config.CASH_BUFFER_PCT
+        available_cash = portfolio["usd_cash"] - min_cash
 
         for pair in config.ASSETS:
             actual_pct = self.get_allocation_pct(pair, portfolio)
@@ -193,11 +241,14 @@ class PortfolioManager:
             else:
                 # Under-allocated: buy to top up (respecting cash buffer)
                 buy_usd = abs(drift_usd)
-                min_cash = total * config.CASH_BUFFER_PCT
-                available = portfolio["usd_cash"] - min_cash
-                buy_usd = min(buy_usd, max(available, 0))
-                buy_qty = buy_usd / price
-                if buy_qty > 0:
+                if available_cash <= 0:
+                    continue
+
+                spend_used = min(buy_usd, available_cash)
+                available_cash -= spend_used
+
+                buy_qty = spend_used / price if price > 0 else 0
+                if buy_qty > 0 and spend_used > 0:
                     trades.append({
                         "pair": pair,
                         "side": "BUY",
