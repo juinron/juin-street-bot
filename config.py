@@ -14,11 +14,11 @@ BASE_URL = "https://mock-api.roostoo.com"
 ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD"]
 
 # Bollinger Band parameters
-BB_PERIOD = 20
+BB_PERIOD = 40
 BB_STD_DEV = 2.0
 
 # RSI parameters
-RSI_PERIOD = 14
+RSI_PERIOD = 28
 RSI_OVERSOLD = 40
 RSI_OVERBOUGHT = 60
 
@@ -35,7 +35,7 @@ DAILY_LOSS_LIMIT_PCT = 0.05        # no buys if down 5% vs yesterday close
 MAX_DRAWDOWN_PCT = 0.15            # halt all trading if 15% below peak
 
 # Scheduling
-SIGNAL_LOOP_MINUTES = 15     # run signal loop every 15 minutes
+SIGNAL_LOOP_MINUTES = 30     # run signal loop every 30 minutes
 DAILY_REBALANCE_HOUR = 9      # rebalance at 09:00 UTC
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
@@ -49,7 +49,7 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "15m"  # matches SIGNAL_LOOP_MINUTES
+CANDLE_INTERVAL = "30m"  # matches SIGNAL_LOOP_MINUTES
 CANDLE_BOOTSTRAP_COUNT = 50  # candles to fetch on startup (BB_PERIOD=20 + buffer)
 
 # Map Roostoo pairs → Binance symbols (Roostoo uses /USD, Binance uses USDT)
