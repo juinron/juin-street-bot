@@ -11,7 +11,7 @@ API_SECRET = os.getenv("API_SECRET", "")
 BASE_URL = "https://mock-api.roostoo.com"
 
 # Traded pairs (Roostoo uses COIN/USD format)
-ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD"]
+ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD"]
 
 # Bollinger Band parameters
 BB_PERIOD = 20
@@ -23,7 +23,7 @@ RSI_OVERSOLD = 40
 RSI_OVERBOUGHT = 60
 
 # Portfolio allocation
-TARGET_ALLOCATION_PCT = 0.225  # 22.5% per asset
+TARGET_ALLOCATION_PCT = 0.15  # 15% per asset (6 assets + 10% cash buffer)
 CASH_BUFFER_PCT = 0.10        # keep 10% in USD
 REBALANCE_DRIFT_PCT = 0.03    # rebalance if >3% off target
 
@@ -59,6 +59,7 @@ BINANCE_SYMBOL_MAP = {
     "SOL/USD": "SOLUSDT",
     "BNB/USD": "BNBUSDT",
     "XRP/USD": "XRPUSDT",
+    "LINK/USD": "LINKUSDT",
 }
 
 # File paths

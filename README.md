@@ -4,7 +4,7 @@ An autonomous Python trading bot for the [Roostoo](https://roostoo.com) mock exc
 
 ## Strategy
 
-The bot trades **5 crypto pairs** (BTC, ETH, SOL, BNB, XRP against USD) on a **15-minute loop**:
+The bot trades **6 crypto pairs** (BTC, ETH, SOL, BNB, XRP, LINK against USD) on a **15-minute loop**:
 
 1. **Fetch market data** via Roostoo ticker API and build local price history
 2. **Calculate Bollinger Bands** (20-period SMA ± 2 std devs) and **RSI** (14-period)
@@ -13,7 +13,7 @@ The bot trades **5 crypto pairs** (BTC, ETH, SOL, BNB, XRP against USD) on a **1
 5. **Orders**: Limit orders placed just inside the spread (±0.1% from current price)
 
 ### Daily Rebalance (09:00 UTC)
-Ensures each asset stays near its **22.5% target allocation**. If any position drifts more than ±3%, the bot trims or tops up automatically. This guarantees activity even in flat markets.
+Ensures each asset stays near its **15% target allocation**. If any position drifts more than ±3%, the bot trims or tops up automatically. This guarantees activity even in flat markets.
 
 ### Risk Management
 | Guard | Trigger | Action |
@@ -49,7 +49,7 @@ All tunable parameters are in [`config.py`](config.py) — adjust without touchi
 | `RSI_PERIOD` | 14 | RSI calculation period |
 | `RSI_OVERSOLD` | 40 | RSI threshold for buy signal |
 | `RSI_OVERBOUGHT` | 60 | RSI threshold for sell signal |
-| `TARGET_ALLOCATION_PCT` | 22.5% | Target allocation per asset |
+| `TARGET_ALLOCATION_PCT` | 15% | Target allocation per asset |
 | `CASH_BUFFER_PCT` | 10% | Minimum USD cash reserve |
 | `STOP_LOSS_PCT` | 4% | Per-trade stop-loss threshold |
 | `SIGNAL_LOOP_MINUTES` | 15 | Minutes between signal evaluations |
