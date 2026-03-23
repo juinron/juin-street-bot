@@ -173,18 +173,25 @@ def compute_signal(pair: str, held_assets: set) -> str:
     # Extract coin symbol from pair (e.g., "BTC" from "BTC/USD")
     coin = pair.split("/")[0]
 
-    # BUY: price below lower band + RSI oversold + no existing position
-    if current_price < current_lower and current_rsi < config.RSI_OVERSOLD:
-        if coin not in held_assets:
-            log.info(f"{pair}: BUY signal — price below lower BB, RSI={current_rsi:.1f}")
-            return "BUY"
-        log.info(f"{pair}: BUY signal conditions met but already holding, hold")
+    # BUY: price below lower band OR RSI oversold.
+    # We don't require "not already holding" here because the scheduler's
+    # allocation/cash sizing prevents buys when you're already at/above target.
+    if current_price < current_lower or current_rsi < config.RSI_OVERSOLD:
+        log.info(
+            f"{pair}: BUY signal — "
+            f"price={current_price:.2f} lowerBB={current_lower:.2f} "
+            f"RSI={current_rsi:.1f}"
+        )
+        return "BUY"
 
-    # SELL: price above upper band + RSI overbought + holding position
-    if current_price > current_upper and current_rsi > config.RSI_OVERBOUGHT:
-        if coin in held_assets:
-            log.info(f"{pair}: SELL signal — price above upper BB, RSI={current_rsi:.1f}")
-            return "SELL"
-        log.info(f"{pair}: SELL signal conditions met but not holding, hold")
+    # SELL: price above upper band OR RSI overbought.
+    # The scheduler already checks available quantity from portfolio balances.
+    if current_price > current_upper or current_rsi > config.RSI_OVERBOUGHT:
+        log.info(
+            f"{pair}: SELL signal — "
+            f"price={current_price:.2f} upperBB={current_upper:.2f} "
+            f"RSI={current_rsi:.1f}"
+        )
+        return "SELL"
 
     return "HOLD"
