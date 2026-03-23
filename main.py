@@ -11,6 +11,7 @@ from api_client import RoostooClient
 from portfolio import PortfolioManager
 from risk_manager import RiskManager
 from scheduler import create_scheduler, signal_loop
+from strategy import bootstrap_price_history
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,9 @@ def main():
     else:
         log.error("Failed to connect to Roostoo API — check credentials and network")
         sys.exit(1)
+
+    # Bootstrap candle data from Binance so signals fire immediately
+    bootstrap_price_history(client)
 
     # Run initial cycle immediately
     log.info("Running initial signal loop...")

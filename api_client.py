@@ -84,6 +84,47 @@ class RoostooClient:
         res.raise_for_status()
         return res.json()
 
+    @retry
+    def get_klines(
+        self, binance_symbol: str, interval: str, limit: int
+    ) -> Optional[list]:
+        """Fetch historical klines from Binance public API (no auth required).
+
+        Args:
+            binance_symbol: Binance trading pair symbol (e.g. 'BTCUSDT').
+            interval: Candle interval (e.g. '2h', '1h', '1d').
+            limit: Number of candles to fetch (max 1000).
+
+        Returns:
+            List of dicts with keys: open_time, open, high, low, close, volume,
+            close_time. Returns None on failure.
+        """
+        params = {
+            "symbol": binance_symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        res = requests.get(
+            f"{config.BINANCE_BASE_URL}/api/v3/klines",
+            params=params,
+            timeout=15,
+        )
+        res.raise_for_status()
+        raw = res.json()
+
+        candles = []
+        for entry in raw:
+            candles.append({
+                "open_time": entry[0],
+                "open": float(entry[1]),
+                "high": float(entry[2]),
+                "low": float(entry[3]),
+                "close": float(entry[4]),
+                "volume": float(entry[5]),
+                "close_time": entry[6],
+            })
+        return candles
+
     # ── Signed endpoints ──
 
     @retry

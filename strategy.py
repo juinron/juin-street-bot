@@ -13,6 +13,62 @@ import config
 log = logging.getLogger(__name__)
 
 
+def bootstrap_price_history(client) -> None:
+    """Fetch historical 2h candles from Binance and seed price_history.csv.
+
+    Called once on startup so the strategy has enough data points
+    (BB_PERIOD=20) to immediately generate signals without waiting
+    40 hours to accumulate snapshots.
+
+    Args:
+        client: RoostooClient instance (used for its get_klines method).
+    """
+    log.info("Bootstrapping price history from Binance...")
+
+    rows = []
+    for pair in config.ASSETS:
+        binance_symbol = config.BINANCE_SYMBOL_MAP.get(pair)
+        if not binance_symbol:
+            log.warning(f"{pair}: no Binance symbol mapping, skipping bootstrap")
+            continue
+
+        candles = client.get_klines(
+            binance_symbol=binance_symbol,
+            interval=config.CANDLE_INTERVAL,
+            limit=config.CANDLE_BOOTSTRAP_COUNT,
+        )
+        if not candles:
+            log.warning(f"{pair}: failed to fetch klines from Binance")
+            continue
+
+        for candle in candles:
+            # Convert Binance close_time (ms) to ISO timestamp
+            close_ts = datetime.fromtimestamp(
+                candle["close_time"] / 1000, tz=timezone.utc
+            ).isoformat()
+            rows.append([
+                close_ts, pair, candle["close"],
+                candle["high"], candle["low"],
+            ])
+
+        log.info(
+            f"{pair}: bootstrapped {len(candles)} candles from Binance "
+            f"({binance_symbol})"
+        )
+
+    if not rows:
+        log.warning("No candles bootstrapped — strategy will wait for live data")
+        return
+
+    # Overwrite price_history.csv with fresh bootstrapped data
+    with open(config.PRICE_HISTORY_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "pair", "last_price", "max_bid", "min_ask"])
+        writer.writerows(rows)
+
+    log.info(f"Price history bootstrapped: {len(rows)} total rows written")
+
+
 def collect_price_snapshot(client) -> dict:
     """Fetch current ticker for all assets and append to price_history.csv.
     Returns dict of {pair: last_price} for convenience.

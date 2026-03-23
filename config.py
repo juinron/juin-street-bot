@@ -47,6 +47,19 @@ SELL_LIMIT_OFFSET = 1.001     # sell limit = price * 1.001
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 5
 
+# Binance public API for historical candle data (no auth required)
+BINANCE_BASE_URL = "https://data-api.binance.vision"
+CANDLE_INTERVAL = "2h"  # matches SIGNAL_LOOP_HOURS
+CANDLE_BOOTSTRAP_COUNT = 50  # candles to fetch on startup (BB_PERIOD=20 + buffer)
+
+# Map Roostoo pairs → Binance symbols (Roostoo uses /USD, Binance uses USDT)
+BINANCE_SYMBOL_MAP = {
+    "BTC/USD": "BTCUSDT",
+    "ETH/USD": "ETHUSDT",
+    "SOL/USD": "SOLUSDT",
+    "BNB/USD": "BNBUSDT",
+}
+
 # File paths
 TRADES_LOG_FILE = "trades_log.csv"
 PORTFOLIO_LOG_FILE = "portfolio_snapshots.csv"
