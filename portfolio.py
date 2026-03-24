@@ -121,7 +121,7 @@ class PortfolioManager:
             coin_balance = wallet.get(coin, {}).get("Free", 0)
             coin_locked = wallet.get(coin, {}).get("Lock", 0)
             total_coin = coin_balance + coin_locked
-            balances[coin] = coin_balance
+            balances[coin] = total_coin
 
             ticker = ticker_data.get("Data", {}).get(pair, {})
             last_price = ticker.get("LastPrice", 0)
