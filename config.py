@@ -23,8 +23,8 @@ RSI_OVERSOLD = 40
 RSI_OVERBOUGHT = 60
 
 # Portfolio allocation
-TARGET_ALLOCATION_PCT = 0.15  # 15% per asset (6 assets + 10% cash buffer)
-CASH_BUFFER_PCT = 0.10        # keep 10% in USD
+TARGET_ALLOCATION_PCT = 0.16  # 16% per asset (6 assets + 4% cash buffer)
+CASH_BUFFER_PCT = 0.04        # keep 4% in USD
 REBALANCE_DRIFT_PCT = 0.03    # rebalance if >3% off target
 
 # Risk management
@@ -40,7 +40,7 @@ DAILY_REBALANCE_HOUR = 9      # rebalance at 09:00 UTC
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
 # Order pricing offsets (maker order placement)
-BUY_LIMIT_OFFSET = 0.999      # buy limit = price * 0.999
+BUY_LIMIT_OFFSET = 1.001      # buy limit = price * 1.001 (slightly above current price to increase fill probability)
 SELL_LIMIT_OFFSET = 1.001     # sell limit = price * 1.001
 
 # API retry settings

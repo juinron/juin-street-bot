@@ -259,9 +259,14 @@ class PortfolioManager:
 
         return trades
 
-    def record_entry(self, coin: str, price: float):
-        """Record entry price after a buy is filled."""
-        self.entry_prices[coin] = price
+    def record_entry(self, coin: str, new_qty: float, new_price: float, current_qty: float):
+        """Record entry price after a buy is filled, using weighted average price."""
+        old_price = self.entry_prices.get(coin, 0)
+        if current_qty > 0 and old_price > 0:
+            total_cost = (current_qty * old_price) + (new_qty * new_price)
+            self.entry_prices[coin] = total_cost / (current_qty + new_qty)
+        else:
+            self.entry_prices[coin] = new_price
         self.save_state()
 
     def clear_entry(self, coin: str):

@@ -207,7 +207,8 @@ def _signal_loop_inner(
                 # Record entry if filled immediately
                 if detail.get("Status") == "FILLED":
                     filled_price = detail.get("FilledAverPrice", limit_price)
-                    pm.record_entry(coin, filled_price)
+                    current_qty = portfolio["balances"].get(coin, 0)
+                    pm.record_entry(coin, quantity, filled_price, current_qty)
                     # Note: we already reserved cash with a conservative limit_cost.
 
                 # Reserve cash for the order so later BUYs in this loop can't overdraft.
@@ -345,7 +346,8 @@ def _daily_rebalance_inner(
             )
             coin = pair.split("/")[0]
             if side == "BUY" and detail.get("Status") == "FILLED":
-                pm.record_entry(coin, detail.get("FilledAverPrice", price))
+                current_qty = portfolio["balances"].get(coin, 0)
+                pm.record_entry(coin, quantity, detail.get("FilledAverPrice", price), current_qty)
             elif side == "SELL" and detail.get("Status") == "FILLED":
                 pm.clear_entry(coin)
         else:
