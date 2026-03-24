@@ -54,14 +54,16 @@ class TradeLogger:
 class PortfolioLogger:
     """Appends portfolio snapshots to portfolio_snapshots.csv."""
 
-    COLUMNS = [
-        "timestamp", "total_value_usd", "btc_value", "eth_value",
-        "sol_value", "bnb_value", "usd_cash", "daily_return_pct",
-        "drawdown_from_peak_pct",
-    ]
-
     def __init__(self, filepath: str = None):
         self.filepath = filepath or config.PORTFOLIO_LOG_FILE
+        # Build columns dynamically from config
+        self.asset_columns = [f"{pair.split('/')[0].lower()}_value" 
+                              for pair in config.ASSETS]
+        self.COLUMNS = (
+            ["timestamp", "total_value_usd"]
+            + self.asset_columns
+            + ["usd_cash", "daily_return_pct", "drawdown_from_peak_pct"]
+        )
         self._ensure_header()
 
     def _ensure_header(self):
@@ -73,17 +75,13 @@ class PortfolioLogger:
         self, total_value: float, asset_values: dict,
         usd_cash: float, daily_return_pct: float, drawdown_pct: float,
     ):
-        row = [
-            datetime.now(timezone.utc).isoformat(),
-            round(total_value, 2),
-            round(asset_values.get("BTC/USD", 0), 2),
-            round(asset_values.get("ETH/USD", 0), 2),
-            round(asset_values.get("SOL/USD", 0), 2),
-            round(asset_values.get("BNB/USD", 0), 2),
-            round(usd_cash, 2),
-            round(daily_return_pct, 4),
-            round(drawdown_pct, 4),
-        ]
+        asset_rows = [round(asset_values.get(pair, 0), 2) 
+                      for pair in config.ASSETS]
+        row = (
+            [datetime.now(timezone.utc).isoformat(), round(total_value, 2)]
+            + asset_rows
+            + [round(usd_cash, 2), round(daily_return_pct, 4), round(drawdown_pct, 4)]
+        )
         with open(self.filepath, "a", newline="") as f:
             csv.writer(f).writerow(row)
         logging.getLogger(__name__).info(
