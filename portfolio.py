@@ -134,7 +134,7 @@ class PortfolioManager:
             asset_values[pair] = value
             total_value += value
 
-            if coin_balance > 0:
+            if total_coin > 0:
                 held_assets.add(coin)
 
         # Initialize starting value on first run
