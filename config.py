@@ -18,9 +18,9 @@ BB_PERIOD = 20
 BB_STD_DEV = 2.0
 
 # RSI parameters
-RSI_PERIOD = 28
-RSI_OVERSOLD = 35
-RSI_OVERBOUGHT = 65
+RSI_PERIOD = 14
+RSI_OVERSOLD = 40
+RSI_OVERBOUGHT = 60
 
 # Portfolio allocation
 TARGET_ALLOCATION_PCT = 0.15  # 15% per asset (6 assets + 10% cash buffer)

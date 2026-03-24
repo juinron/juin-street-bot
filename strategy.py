@@ -149,7 +149,7 @@ def compute_signal(pair: str, held_assets: set) -> str:
         return "HOLD"
 
     # Use last 50 data points (as per spec)
-    df = df.tail(50)
+    df = df.tail(80)
     close = df["last_price"].astype(float)
 
     upper, lower, sma = compute_bollinger_bands(close)
