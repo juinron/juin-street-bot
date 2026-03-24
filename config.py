@@ -14,13 +14,13 @@ BASE_URL = "https://mock-api.roostoo.com"
 ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD"]
 
 # Bollinger Band parameters
-BB_PERIOD = 40
+BB_PERIOD = 20
 BB_STD_DEV = 2.0
 
 # RSI parameters
 RSI_PERIOD = 28
-RSI_OVERSOLD = 40
-RSI_OVERBOUGHT = 60
+RSI_OVERSOLD = 35
+RSI_OVERBOUGHT = 65
 
 # Portfolio allocation
 TARGET_ALLOCATION_PCT = 0.15  # 15% per asset (6 assets + 10% cash buffer)
@@ -50,7 +50,7 @@ RETRY_DELAY_SECONDS = 5
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
 CANDLE_INTERVAL = "30m"  # matches SIGNAL_LOOP_MINUTES
-CANDLE_BOOTSTRAP_COUNT = 50  # candles to fetch on startup (BB_PERIOD=20 + buffer)
+CANDLE_BOOTSTRAP_COUNT = 100  # candles to fetch on startup (BB_PERIOD=20 + buffer)
 
 # Map Roostoo pairs → Binance symbols (Roostoo uses /USD, Binance uses USDT)
 BINANCE_SYMBOL_MAP = {
