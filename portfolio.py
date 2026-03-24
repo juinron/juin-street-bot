@@ -227,6 +227,11 @@ class PortfolioManager:
             coin = pair.split("/")[0]
             drift_usd = drift * total
 
+            # Do not buy into an asset we don't currently hold.
+            # Let the signal_loop handle entries.
+            if coin not in portfolio.get("held_assets", set()) and drift < 0:
+                continue
+
             if drift > 0:
                 # Over-allocated: sell the excess
                 sell_qty = drift_usd / price
