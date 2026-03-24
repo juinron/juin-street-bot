@@ -148,8 +148,8 @@ def compute_signal(pair: str, held_assets: set) -> str:
         log.info(f"{pair}: insufficient data ({len(df)}/{config.BB_PERIOD}), holding")
         return "HOLD"
 
-    # Use last 50 data points (as per spec)
-    df = df.tail(80)
+    # Use last 200 data points
+    df = df.tail(200)
     close = df["last_price"].astype(float)
 
     upper, lower, sma = compute_bollinger_bands(close)
