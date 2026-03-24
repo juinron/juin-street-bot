@@ -13,7 +13,12 @@ The bot trades **6 crypto pairs** (BTC, ETH, SOL, BNB, XRP, LINK against USD) on
 5. **Orders**: Limit orders placed just inside the spread (±0.1% from current price)
 
 ### Daily Rebalance (09:00 UTC)
-Ensures each asset stays near its **15% target allocation**. If any position drifts more than ±3%, the bot trims or tops up automatically. This guarantees activity even in flat markets.
+Manages **existing positions only** to stay near the **16% target allocation**:
+- **Trim winners**: Sells assets over-allocated (taking profit)
+- **Top up losers**: Buys assets under-allocated (but only if already held)
+- **No new entries**: The rebalancer **cannot** initiate new positions from 0% baseline — all entries are strictly handled by the signal loop
+
+This prevents the rebalancer from "catching falling knives" and ensures the strategy controls trade entry timing. Drifts >±3% trigger rebalancing.
 
 ### Risk Management
 | Guard | Trigger | Action |
@@ -28,7 +33,7 @@ Ensures each asset stays near its **15% target allocation**. If any position dri
 | File | Description |
 |---|---|
 | `trades_log.csv` | Every trade, cancellation, and error with timestamps and reasons |
-| `portfolio_snapshots.csv` | Portfolio value breakdown every 15 minutes + daily |
+| `portfolio_snapshots.csv` | Portfolio value breakdown every 30 minutes + daily |
 | `price_history.csv` | Ticker prices collected each loop (feeds strategy calculations) |
 | `state.json` | Persisted bot state (entry prices, peak value) for crash recovery |
 
@@ -49,10 +54,10 @@ All tunable parameters are in [`config.py`](config.py) — adjust without touchi
 | `RSI_PERIOD` | 14 | RSI calculation period |
 | `RSI_OVERSOLD` | 40 | RSI threshold for buy signal |
 | `RSI_OVERBOUGHT` | 60 | RSI threshold for sell signal |
-| `TARGET_ALLOCATION_PCT` | 15% | Target allocation per asset |
-| `CASH_BUFFER_PCT` | 10% | Minimum USD cash reserve |
+| `TARGET_ALLOCATION_PCT` | 16% | Target allocation per asset |
+| `CASH_BUFFER_PCT` | 4% | Minimum USD cash reserve |
 | `STOP_LOSS_PCT` | 4% | Per-trade stop-loss threshold |
-| `SIGNAL_LOOP_MINUTES` | 15 | Minutes between signal evaluations |
+| `SIGNAL_LOOP_MINUTES` | 30 | Minutes between signal evaluations |
 
 ## Architecture
 

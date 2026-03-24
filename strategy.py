@@ -173,10 +173,10 @@ def compute_signal(pair: str, held_assets: set) -> str:
     # Extract coin symbol from pair (e.g., "BTC" from "BTC/USD")
     coin = pair.split("/")[0]
 
-    # BUY: price below lower band OR RSI oversold.
+    # BUY: price below lower band AND RSI oversold.
     # We don't require "not already holding" here because the scheduler's
     # allocation/cash sizing prevents buys when you're already at/above target.
-    if current_price < current_lower or current_rsi < config.RSI_OVERSOLD:
+    if current_price < current_lower and current_rsi < config.RSI_OVERSOLD:
         log.info(
             f"{pair}: BUY signal — "
             f"price={current_price:.2f} lowerBB={current_lower:.2f} "
