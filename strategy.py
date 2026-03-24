@@ -184,9 +184,9 @@ def compute_signal(pair: str, held_assets: set) -> str:
         )
         return "BUY"
 
-    # SELL: price above upper band OR RSI overbought.
+    # SELL: price above upper band AND RSI overbought.
     # The scheduler already checks available quantity from portfolio balances.
-    if current_price > current_upper or current_rsi > config.RSI_OVERBOUGHT:
+    if current_price > current_upper and current_rsi > config.RSI_OVERBOUGHT:
         log.info(
             f"{pair}: SELL signal — "
             f"price={current_price:.2f} upperBB={current_upper:.2f} "
