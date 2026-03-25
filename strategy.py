@@ -173,10 +173,16 @@ def compute_signal(pair: str, held_assets: set) -> str:
     # Extract coin symbol from pair (e.g., "BTC" from "BTC/USD")
     coin = pair.split("/")[0]
 
+    # If a tiny position is present but below the dust threshold, treat it as not held
+    # for trading signal decisions.  (fetch_portfolio already filters held_assets.)
+    is_held = coin in held_assets
+
     # BUY: price below lower band AND RSI oversold.
-    # We don't require "not already holding" here because the scheduler's
-    # allocation/cash sizing prevents buys when you're already at/above target.
+    # If already properly held, let rebalance/top-up logic handle increases; avoid repeated buys.
     if current_price < current_lower and current_rsi < config.RSI_OVERSOLD:
+        if is_held:
+            log.info(f"{pair}: BUY signal suppressed — existing position held")
+            return "HOLD"
         log.info(
             f"{pair}: BUY signal — "
             f"price={current_price:.2f} lowerBB={current_lower:.2f} "
@@ -185,8 +191,11 @@ def compute_signal(pair: str, held_assets: set) -> str:
         return "BUY"
 
     # SELL: price above upper band AND RSI overbought.
-    # The scheduler already checks available quantity from portfolio balances.
+    # Only sell if we consider this a valid held asset (non-dust).
     if current_price > current_upper and current_rsi > config.RSI_OVERBOUGHT:
+        if not is_held:
+            log.info(f"{pair}: SELL signal suppressed — position below dust threshold")
+            return "HOLD"
         log.info(
             f"{pair}: SELL signal — "
             f"price={current_price:.2f} upperBB={current_upper:.2f} "

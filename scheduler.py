@@ -165,6 +165,11 @@ def _signal_loop_inner(
         if price <= 0:
             continue
 
+        # Ensure we do not act on tiny dust positions that are flagged HOLD via strategy
+        if signal == "SELL" and coin not in portfolio.get("held_assets", set()):
+            log.info(f"{pair}: skipping SELL — coin not considered held (dust threshold)")
+            continue
+
         if signal == "BUY" and rm.can_buy(total_value):
             buy_qty, spend_used = pm.calculate_buy_quantity(
                 pair, price, portfolio, available_usd=available_usd

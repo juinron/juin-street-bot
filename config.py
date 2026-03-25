@@ -62,6 +62,11 @@ BINANCE_SYMBOL_MAP = {
     "LINK/USD": "LINKUSDT",
 }
 
+# Dust handling / minimum tradable value
+# Treats tiny residual assets (e.g. 0.01 ETH) as non-held for signal filtering.
+MIN_TRADE_USD = 10.0
+DUST_THRESHOLD_USD = 10.0
+
 # File paths
 TRADES_LOG_FILE = "trades_log.csv"
 PORTFOLIO_LOG_FILE = "portfolio_snapshots.csv"

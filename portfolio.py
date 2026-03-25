@@ -134,8 +134,14 @@ class PortfolioManager:
             asset_values[pair] = value
             total_value += value
 
-            if total_coin > 0:
+            # Skip “dust” positions as held assets to avoid repeated unnecessary signals.
+            if total_coin > 0 and value >= config.DUST_THRESHOLD_USD:
                 held_assets.add(coin)
+            elif total_coin > 0:
+                log.debug(
+                    f"{pair}: dust position ({total_coin:.8f} {coin}, ${value:.2f}) below "
+                    f"DUST_THRESHOLD_USD={config.DUST_THRESHOLD_USD}, not marking held"
+                )
 
         # Initialize starting value on first run
         if self.starting_value == 0:
