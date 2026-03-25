@@ -75,7 +75,7 @@ class PortfolioLogger:
         self, total_value: float, asset_values: dict,
         usd_cash: float, daily_return_pct: float, drawdown_pct: float,
     ):
-        asset_rows = [round(asset_values.get(pair, 0), 2) 
+        asset_rows = [round(asset_values.get(pair, 0), 3) 
                       for pair in config.ASSETS]
         row = (
             [datetime.now(timezone.utc).isoformat(), round(total_value, 2)]
