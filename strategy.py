@@ -252,7 +252,7 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
     }
 
     log.info(
-        f"{pair}: price={current_price:.2f} SMA={current_sma:.2f} "
+        f"{pair}: price={current_price:.4f} SMA={current_sma:.4f} "
         f"RSI={current_rsi:.1f} RSI_Z={current_rsi_z:.2f} ATR={current_atr:.4f}"
     )
 
@@ -279,7 +279,7 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
         
         log.info(
             f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD}) "
-            f"price={current_price:.2f} SMA={current_sma:.2f}"
+            f"price={current_price:.4f} SMA={current_sma:.4f}"
         )
         return "BUY", metadata
 
@@ -293,7 +293,7 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
         
         log.info(
             f"{pair}: SELL signal — Z_RSI={current_rsi_z:.2f} (> {config.RSI_Z_THRESHOLD}) "
-            f"price={current_price:.2f} SMA={current_sma:.2f}"
+            f"price={current_price:.4f} SMA={current_sma:.4f}"
         )
         return "SELL", metadata
 
