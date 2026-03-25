@@ -59,6 +59,9 @@ def calculate_spread_aware_limit_price(
     # Round to price precision
     limit_price = pm.floor_to_precision(limit_price, price_precision)
     return limit_price
+
+
+def cancel_stale_orders(client: RoostooClient, trade_logger: TradeLogger, portfolio_value: float):
     """Cancel any pending orders older than STALE_ORDER_HOURS."""
     import time
     result = client.query_order(pending_only=True)
