@@ -11,7 +11,7 @@ API_SECRET = os.getenv("API_SECRET", "")
 BASE_URL = "https://mock-api.roostoo.com"
 
 # Traded pairs (Roostoo uses COIN/USD format)
-ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD"]
+ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD", "ADA/USD", "FET/USD"]
 
 # Bollinger Band parameters
 BB_PERIOD = 20
@@ -30,20 +30,22 @@ ATR_MULTIPLIER = 3.5        # stop-loss at entry_price - (k * ATR)
 RSI_Z_PERIOD = 20           # rolling window for RSI mean/std calculation
 RSI_Z_THRESHOLD = 2.0       # trigger signal when |Z_RSI| > threshold (2 sigma deviation)
 
-# Portfolio allocation
-TARGET_ALLOCATION_PCT = 0.16  # 16% per asset (6 assets + 4% cash buffer)
-CASH_BUFFER_PCT = 0.04        # keep 4% in USD
-REBALANCE_DRIFT_PCT = 0.03    # rebalance if >3% off target
+# Portfolio allocation (Tiered Fixed-Fractional Sizing)
+CASH_BUFFER_PCT = 0.10        # keep 10% in USD for aggressive buy cycles
+REBALANCE_DRIFT_PCT = 0.03    # rebalance if >3% off allocation
+MAX_ASSET_ALLOCATION_PCT = 0.20  # never exceed 20% allocation in single asset
 
-# Continuous position sizing (tranche buying)
-# Allow scaling into positions at different price levels
-TRANCHE_PCT = 0.05            # base tranche: 5% of target allocation per deviation level
-TRANCHE_LEVELS = {             # price deviation from 20-period SMA → allocate tranche
-    2: 0.05,                   # at 2-sigma below mean: allocate 5%
-    2.5: 0.05,                 # at 2.5-sigma: allocate another 5%
-    3: 0.05,                   # at 3-sigma: allocate another 5%
+# Fixed fractional buy sizing by asset risk tier
+SIGNAL_SIZES = {
+    "BTC/USD": 0.1,
+    "ETH/USD": 0.1,
+    "SOL/USD": 0.05,
+    "BNB/USD": 0.05,
+    "LINK/USD": 0.05,
+    "ADA/USD": 0.05,
+    "XRP/USD": 0.03,
+    "FET/USD": 0.03,
 }
-MAX_ASSET_ALLOCATION_PCT = 0.20  # never exceed 20% allocation in single asset (vs 16% target)
 
 # Risk management
 CIRCUIT_BREAKER_PAUSE_PCT = 0.10   # pause buys if portfolio drops 10% from start
@@ -83,6 +85,8 @@ BINANCE_SYMBOL_MAP = {
     "BNB/USD": "BNBUSDT",
     "XRP/USD": "XRPUSDT",
     "LINK/USD": "LINKUSDT",
+    "ADA/USD": "ADAUSDT",
+    "FET/USD": "FETUSDT",
 }
 
 # Dust handling / minimum tradable value

@@ -218,6 +218,61 @@ class PortfolioManager:
             return 0
         return portfolio.get("asset_values", {}).get(pair, 0) / total
 
+    def calculate_tiered_fixed_quantity(
+        self,
+        pair: str,
+        price: float,
+        portfolio: dict,
+        available_usd: float = None,
+    ) -> tuple:
+        """Calculate quantity using fixed fractional sizing from config.SIGNAL_SIZES.
+
+        This follows the Tiered Fixed-Fractional model:
+        - Target per-pair allocation = total_value * SIGNAL_SIZES[pair]
+        - Buy only the gap between current allocation and target
+        - Respect MAX_ASSET_ALLOCATION_PCT, CASH_BUFFER_PCT, and MIN_TRADE_USD
+        """
+        total = portfolio.get("total_value", 0)
+        usd_cash = portfolio.get("usd_cash", 0)
+        if total <= 0 or price <= 0:
+            return 0, 0
+
+        target_pct = config.SIGNAL_SIZES.get(pair, 0)
+        if target_pct <= 0:
+            return 0, 0
+
+        target_value = total * target_pct
+        current_value = portfolio.get("asset_values", {}).get(pair, 0)
+        buy_usd = target_value - current_value
+
+        if buy_usd <= 0:
+            return 0, 0
+
+        current_pct = current_value / total if total > 0 else 0
+        max_pct = config.MAX_ASSET_ALLOCATION_PCT
+        remaining_pct = max(0.0, max_pct - current_pct)
+
+        if remaining_pct <= 0:
+            return 0, 0
+
+        max_allowed_usd = total * remaining_pct
+        buy_usd = min(buy_usd, max_allowed_usd)
+
+        if buy_usd < config.MIN_TRADE_USD:
+            return 0, 0
+
+        min_cash = total * config.CASH_BUFFER_PCT
+        available = (available_usd if available_usd is not None else (usd_cash - min_cash))
+        if available <= 0:
+            return 0, 0
+
+        spend_used = min(buy_usd, available)
+        if spend_used < config.MIN_TRADE_USD:
+            return 0, 0
+
+        quantity = spend_used / price
+        return quantity, spend_used
+
     def calculate_buy_quantity(
         self,
         pair: str,
@@ -225,38 +280,13 @@ class PortfolioManager:
         portfolio: dict,
         available_usd: float = None,
     ) -> Tuple[float, float]:
-        """
-        How much to buy to reach target allocation, respecting cash buffer.
-
-        Returns: (quantity, spend_used_usd)
-        """
-        total = portfolio["total_value"]
-        usd_cash = portfolio["usd_cash"]
-
-        target_usd = total * config.TARGET_ALLOCATION_PCT
-        current_value = portfolio["asset_values"].get(pair, 0)
-        spend = target_usd - current_value
-
-        if spend <= 0:
-            return 0, 0
-
-        # Avoid creating a tiny purchase that later becomes dust.
-        if spend < config.MIN_TRADE_USD:
-            log.info(
-                f"calculate_buy_quantity: spend ${spend:.2f} below MIN_TRADE_USD={config.MIN_TRADE_USD}, skip"
-            )
-            return 0, 0
-
-        # Respect cash buffer (optionally override with a shared "remaining cash" during a run)
-        min_cash = total * config.CASH_BUFFER_PCT
-        available = (available_usd if available_usd is not None else (usd_cash - min_cash))
-        if available <= 0:
-            log.info(f"Cash buffer would be breached, skipping buy for {pair}")
-            return 0, 0
-
-        spend_used = min(spend, available)
-        quantity = spend_used / price if price > 0 else 0
-        return quantity, spend_used
+        """Legacy wrapper adapted to Tiered Fixed-Fractional sizing."""
+        return self.calculate_tiered_fixed_quantity(
+            pair=pair,
+            price=price,
+            portfolio=portfolio,
+            available_usd=available_usd,
+        )
 
     def calculate_tranche_quantity(
         self,
@@ -284,14 +314,21 @@ class PortfolioManager:
         if price <= 0:
             return 0, 0, 0
         
+        tranche_levels = getattr(config, "TRANCHE_LEVELS", {})
+        if not tranche_levels:
+            log.warning(
+                f"{pair}: config.TRANCHE_LEVELS not defined, tranche logic is disabled"
+            )
+            return 0, 0, 0
+
         # Determine tranche level (round sigma to nearest discrete level)
         # e.g., if TRANCHE_LEVELS = {2: 0.05, 2.5: 0.05, 3: 0.05}
         # and sigma_level = 2.3, use level 2 (5% allocation)
         tranche_pct = 0
         matched_sigma = None
-        for level in sorted(config.TRANCHE_LEVELS.keys()):
+        for level in sorted(tranche_levels.keys()):
             if sigma_level >= level:
-                tranche_pct = config.TRANCHE_LEVELS[level]
+                tranche_pct = tranche_levels[level]
                 matched_sigma = level
         
         if tranche_pct <= 0:
@@ -350,8 +387,12 @@ class PortfolioManager:
         available_cash = portfolio["usd_cash"] - min_cash
 
         for pair in config.ASSETS:
+            target_pct = config.SIGNAL_SIZES.get(pair, 0)
+            if target_pct <= 0:
+                continue
+
             actual_pct = self.get_allocation_pct(pair, portfolio)
-            drift = actual_pct - config.TARGET_ALLOCATION_PCT
+            drift = actual_pct - target_pct
 
             if abs(drift) < config.REBALANCE_DRIFT_PCT:
                 continue
@@ -377,7 +418,7 @@ class PortfolioManager:
                         "side": "SELL",
                         "quantity": sell_qty,
                         "price": price * config.SELL_LIMIT_OFFSET,
-                        "reason": f"Rebalance: {actual_pct:.1%} → {config.TARGET_ALLOCATION_PCT:.1%}",
+                        "reason": f"Rebalance: {actual_pct:.1%} → {target_pct:.1%}",
                     })
             else:
                 # Under-allocated: buy to top up (respecting cash buffer)
@@ -395,7 +436,7 @@ class PortfolioManager:
                         "side": "BUY",
                         "quantity": buy_qty,
                         "price": price * config.BUY_LIMIT_OFFSET,
-                        "reason": f"Rebalance: {actual_pct:.1%} → {config.TARGET_ALLOCATION_PCT:.1%}",
+                        "reason": f"Rebalance: {actual_pct:.1%} → {target_pct:.1%}",
                     })
 
         return trades

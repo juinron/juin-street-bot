@@ -47,8 +47,6 @@ def calculate_spread_aware_limit_price(
     Returns:
         Limit price as float, rounded to price precision
     """
-    pm = PortfolioManager()  # temporary, just for floor_to_precision
-    
     if side.upper() == "BUY":
         # Buy at bid + tick, but not above mid-price
         limit_price = min(max_bid + tick_size / (10 ** price_precision), mid_price)
@@ -57,7 +55,7 @@ def calculate_spread_aware_limit_price(
         limit_price = max(min_ask - tick_size / (10 ** price_precision), mid_price)
     
     # Round to price precision
-    limit_price = pm.floor_to_precision(limit_price, price_precision)
+    limit_price = PortfolioManager.floor_to_precision(limit_price, price_precision)
     return limit_price
 
 
@@ -315,21 +313,11 @@ def _signal_loop_inner(
             price_precision = rules.get("price_precision", 4)
             amount_precision = rules.get("amount_precision", 6)
             
-            # Determine if this is a tranche buy or regular buy
-            sigma_level = metadata.get('sigma_level')
-            
-            if sigma_level is not None and sigma_level > 0:
-                # Tranche buying: scale in at different price deviations
-                buy_qty, spend_used, tranche_pct = pm.calculate_tranche_quantity(
-                    pair, price, portfolio, sigma_level, available_usd=available_usd
-                )
-                buy_reason = f"Tranche buy at {sigma_level:.1f}σ deviation"
-            else:
-                # Regular buy to reach target allocation
-                buy_qty, spend_used = pm.calculate_buy_quantity(
-                    pair, price, portfolio, available_usd=available_usd
-                )
-                buy_reason = "Target allocation buy (RSI Z-score oversold)"
+                # Tiered fixed allocation buy
+            buy_qty, spend_used = pm.calculate_tiered_fixed_quantity(
+                pair, price, portfolio, available_usd=available_usd
+            )
+            buy_reason = "Tiered fixed-fractional buy (SIGNAL_SIZES)"
             
             if buy_qty <= 0 or spend_used <= 0:
                 continue
