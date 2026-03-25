@@ -22,26 +22,48 @@ RSI_PERIOD = 14
 RSI_OVERSOLD = 40
 RSI_OVERBOUGHT = 60
 
+# Dynamic ATR-based risk management (replaces static STOP_LOSS_PCT)
+ATR_PERIOD = 14             # rolling window for ATR calculation
+ATR_MULTIPLIER = 2.0        # stop-loss at entry_price - (k * ATR)
+
+# Volatility-adjusted RSI thresholds (replaces static RSI_OVERSOLD/OVERBOUGHT)
+RSI_Z_PERIOD = 20           # rolling window for RSI mean/std calculation
+RSI_Z_THRESHOLD = 2.0       # trigger signal when |Z_RSI| > threshold (2 sigma deviation)
+
 # Portfolio allocation
 TARGET_ALLOCATION_PCT = 0.16  # 16% per asset (6 assets + 4% cash buffer)
 CASH_BUFFER_PCT = 0.04        # keep 4% in USD
 REBALANCE_DRIFT_PCT = 0.03    # rebalance if >3% off target
 
+# Continuous position sizing (tranche buying)
+# Allow scaling into positions at different price levels
+TRANCHE_PCT = 0.05            # base tranche: 5% of target allocation per deviation level
+TRANCHE_LEVELS = {             # price deviation from 20-period SMA → allocate tranche
+    2: 0.05,                   # at 2-sigma below mean: allocate 5%
+    2.5: 0.05,                 # at 2.5-sigma: allocate another 5%
+    3: 0.05,                   # at 3-sigma: allocate another 5%
+}
+MAX_ASSET_ALLOCATION_PCT = 0.20  # never exceed 20% allocation in single asset (vs 16% target)
+
 # Risk management
-STOP_LOSS_PCT = 0.04               # -4% from entry
 CIRCUIT_BREAKER_PAUSE_PCT = 0.10   # pause buys if portfolio drops 10% from start
 CIRCUIT_BREAKER_RESUME_PCT = 0.08  # resume buys when within 8% of start
 DAILY_LOSS_LIMIT_PCT = 0.05        # no buys if down 5% vs yesterday close
 MAX_DRAWDOWN_PCT = 0.15            # halt all trading if 15% below peak
 
+# Spread-aware order execution (replaces static offsets)
+# Quotes limit orders slightly inside the bid-ask spread to act as maker
+MAKER_SPREAD_TICKS = 1             # submit buy at (max_bid + 1 tick), sell at (min_ask - 1 tick)
+
 # Scheduling
-SIGNAL_LOOP_MINUTES = 30     # run signal loop every 30 minutes
+SIGNAL_LOOP_MINUTES = 5      # run signal loop every 5 minutes (high-frequency mode)
 DAILY_REBALANCE_HOUR = 9      # rebalance at 09:00 UTC
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
-# Order pricing offsets (maker order placement)
-BUY_LIMIT_OFFSET = 1.001      # buy limit = price * 1.001 (slightly above current price to increase fill probability)
-SELL_LIMIT_OFFSET = 1.001     # sell limit = price * 1.001
+# Order pricing offsets (DEPRECATED — now using spread-aware execution)
+# Kept for backward compatibility; overridden by MAKER_SPREAD_TICKS in execution
+BUY_LIMIT_OFFSET = 1.001      
+SELL_LIMIT_OFFSET = 1.001     
 
 # API retry settings
 MAX_RETRIES = 3
@@ -49,8 +71,8 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "30m"  # matches SIGNAL_LOOP_MINUTES
-CANDLE_BOOTSTRAP_COUNT = 200  # candles to fetch on startup (BB_PERIOD=20 + buffer)
+CANDLE_INTERVAL = "5m"  # matches SIGNAL_LOOP_MINUTES (5-minute candles for high-frequency)
+CANDLE_BOOTSTRAP_COUNT = 200  # candles to fetch on startup (ATR_PERIOD=14, RSI_PERIOD=14, BB_PERIOD=20 + buffer)
 
 # Map Roostoo pairs → Binance symbols (Roostoo uses /USD, Binance uses USDT)
 BINANCE_SYMBOL_MAP = {

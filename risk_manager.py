@@ -16,19 +16,46 @@ class RiskManager:
         self.daily_loss_active = False
         self.halted = False  # max drawdown halt
 
-    def check_stop_loss(self, coin: str, current_price: float) -> bool:
-        """Returns True if stop-loss triggered (price dropped 4%+ from entry)."""
+    def check_stop_loss(self, coin: str, current_price: float, atr: float = None) -> bool:
+        """Returns True if stop-loss triggered.
+        
+        Dynamic ATR-based stop-loss:
+        stop_loss_price = entry_price - (ATR_MULTIPLIER * atr)
+        
+        Args:
+            coin: Asset identifier (e.g., 'BTC')
+            current_price: Current market price
+            atr: Current ATR value (if None, fallback to 4% legacy mode)
+        
+        Returns:
+            True if current_price <= stop_loss_price
+        """
         entry = self.pm.entry_prices.get(coin)
         if entry is None or entry <= 0:
             return False
 
-        loss_pct = (entry - current_price) / entry
-        if loss_pct >= config.STOP_LOSS_PCT:
-            log.warning(
-                f"STOP-LOSS triggered for {coin}: "
-                f"entry={entry:.2f} current={current_price:.2f} loss={loss_pct:.2%}"
-            )
-            return True
+        # If ATR provided, use dynamic stop-loss
+        if atr is not None and atr > 0:
+            stop_loss_price = entry - (config.ATR_MULTIPLIER * atr)
+            if current_price <= stop_loss_price:
+                loss_pct = (entry - current_price) / entry
+                log.warning(
+                    f"STOP-LOSS triggered for {coin}: "
+                    f"entry={entry:.2f} current={current_price:.2f} "
+                    f"atr={atr:.4f} stop_level={stop_loss_price:.2f} loss={loss_pct:.2%}"
+                )
+                return True
+        else:
+            # Fallback to legacy 4% stop-loss if ATR not available
+            # (for backward compatibility during transition)
+            loss_pct = (entry - current_price) / entry
+            if loss_pct >= 0.04:
+                log.warning(
+                    f"STOP-LOSS triggered for {coin} (legacy 4% mode): "
+                    f"entry={entry:.2f} current={current_price:.2f} loss={loss_pct:.2%}"
+                )
+                return True
+
         return False
 
     def check_circuit_breaker(self, current_value: float) -> bool:

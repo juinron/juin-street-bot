@@ -71,6 +71,13 @@ def bootstrap_price_history(client) -> None:
 
 def collect_price_snapshot(client) -> dict:
     """Fetch current ticker for all assets and append to price_history.csv.
+    
+    Records: timestamp, pair, last_price, max_bid, min_ask
+    
+    max_bid and min_ask are used for:
+    - Spread-aware order execution (quoting inside the spread)
+    - ATR high/low proxies for volatility calculation
+    
     Returns dict of {pair: last_price} for convenience.
     """
     ticker_data = client.get_ticker()
@@ -91,10 +98,11 @@ def collect_price_snapshot(client) -> dict:
             data = ticker_data.get("Data", {}).get(pair)
             if data:
                 last_price = data.get("LastPrice", 0)
+                max_bid = data.get("MaxBid", last_price)  # fallback to last_price if not available
+                min_ask = data.get("MinAsk", last_price)
                 prices[pair] = last_price
                 writer.writerow([
-                    now, pair, last_price,
-                    data.get("MaxBid", 0), data.get("MinAsk", 0),
+                    now, pair, last_price, max_bid, min_ask,
                 ])
 
     log.info(f"Price snapshot collected: {prices}")
@@ -137,70 +145,156 @@ def compute_rsi(prices: pd.Series, period: int = None) -> pd.Series:
     return rsi
 
 
-def compute_signal(pair: str, held_assets: set) -> str:
-    """Evaluate Bollinger Band + RSI signal for a single pair.
-    Returns 'BUY', 'SELL', or 'HOLD'.
+def compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = None) -> pd.Series:
+    """Calculate Average True Range (ATR) using exponential moving average.
+    
+    ATR measures volatility. Used for dynamic stop-loss calculation:
+    stop_loss = entry_price - (ATR_MULTIPLIER * current_atr)
+    """
+    period = period or config.ATR_PERIOD
+    
+    # True Range = max(high - low, abs(high - prev_close), abs(low - prev_close))
+    hl = high - low
+    hc = (high - close.shift(1)).abs()
+    lc = (low - close.shift(1)).abs()
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    
+    # Exponential moving average of TR
+    atr = tr.ewm(alpha=1 / period, min_periods=period).mean()
+    return atr
+
+
+def compute_rsi_zscore(rsi: pd.Series, period: int = None) -> pd.Series:
+    """Calculate rolling Z-score of RSI to detect overbought/oversold extremes.
+    
+    Z_RSI = (RSI_t - mean(RSI)) / std(RSI)
+    
+    Dynamic thresholds:
+    - BUY signal: Z_RSI < -RSI_Z_THRESHOLD (oversold)
+    - SELL signal: Z_RSI > RSI_Z_THRESHOLD (overbought)
+    
+    Replaces static RSI 40/60 thresholds, which don't adapt to market regime.
+    """
+    period = period or config.RSI_Z_PERIOD
+    
+    mean_rsi = rsi.rolling(window=period, min_periods=period).mean()
+    std_rsi = rsi.rolling(window=period, min_periods=period).std()
+    
+    # Avoid division by zero; if std is 0, set zscore to 0
+    z_score = (rsi - mean_rsi) / std_rsi.replace(0, np.nan)
+    return z_score
+
+
+def compute_signal(pair: str, held_assets: set) -> tuple:
+    """Evaluate dynamic signal for an asset using Bollinger Bands, RSI Z-Score, and ATR.
+    
+    Returns: (signal, metadata_dict)
+    signal: 'BUY', 'SELL', or 'HOLD'
+    metadata_dict: {
+        'rsi_zscore': float,
+        'atr': float,
+        'sigma_level': float or None,  # how many sigmas below mean (for tranche buying)
+        'bb_upper': float,
+        'bb_lower': float,
+        'bb_sma': float,
+    }
+    
+    BUY signals support tranche buying:
+    - Any buy triggered by Z_RSI < -threshold gets a tranche level based on price deviation from SMA
+    
+    SELL signals require Z_RSI > threshold AND existing position
     """
     df = load_price_history(pair)
 
-    # Need at least BB_PERIOD data points to calculate bands
-    if len(df) < config.BB_PERIOD:
-        log.info(f"{pair}: insufficient data ({len(df)}/{config.BB_PERIOD}), holding")
-        return "HOLD"
+    # Need enough data for all indicators
+    min_period = max(config.BB_PERIOD, config.RSI_PERIOD, config.RSI_Z_PERIOD, config.ATR_PERIOD)
+    if len(df) < min_period:
+        log.info(f"{pair}: insufficient data ({len(df)}/{min_period}), holding")
+        return "HOLD", {}
 
     # Use last 200 data points
-    df = df.tail(200)
+    df = df.tail(200).copy()
     close = df["last_price"].astype(float)
+    high = df["max_bid"].astype(float)  # use bid as high proxy if available
+    low = df["min_ask"].astype(float)   # use ask as low proxy if available
+    
+    # Fallback to close price if bid/ask not available
+    if high.abs().sum() < 1e-10:  # all zeros or NaN
+        high = close
+    if low.abs().sum() < 1e-10:
+        low = close
 
     upper, lower, sma = compute_bollinger_bands(close)
     rsi = compute_rsi(close)
+    atr = compute_atr(high, low, close)
+    rsi_zscore = compute_rsi_zscore(rsi)
 
     current_price = close.iloc[-1]
     current_upper = upper.iloc[-1]
     current_lower = lower.iloc[-1]
+    current_sma = sma.iloc[-1]
     current_rsi = rsi.iloc[-1]
+    current_rsi_z = rsi_zscore.iloc[-1]
+    current_atr = atr.iloc[-1]
 
     # Skip if indicators are NaN (insufficient data for calculation)
-    if pd.isna(current_upper) or pd.isna(current_rsi):
+    if pd.isna(current_upper) or pd.isna(current_rsi_z) or pd.isna(current_atr):
         log.info(f"{pair}: indicators not ready, holding")
-        return "HOLD"
+        return "HOLD", {}
+
+    metadata = {
+        'rsi_zscore': float(current_rsi_z),
+        'atr': float(current_atr),
+        'bb_upper': float(current_upper),
+        'bb_lower': float(current_lower),
+        'bb_sma': float(current_sma),
+        'sigma_level': None,
+    }
 
     log.info(
-        f"{pair}: price={current_price:.2f} upper={current_upper:.2f} "
-        f"lower={current_lower:.2f} RSI={current_rsi:.1f}"
+        f"{pair}: price={current_price:.2f} SMA={current_sma:.2f} "
+        f"RSI={current_rsi:.1f} RSI_Z={current_rsi_z:.2f} ATR={current_atr:.4f}"
     )
 
-    # Extract coin symbol from pair (e.g., "BTC" from "BTC/USD")
     coin = pair.split("/")[0]
-
-    # If a tiny position is present but below the dust threshold, treat it as not held
-    # for trading signal decisions.  (fetch_portfolio already filters held_assets.)
     is_held = coin in held_assets
 
-    # BUY: price below lower band AND RSI oversold.
-    # If already properly held, let rebalance/top-up logic handle increases; avoid repeated buys.
-    if current_price < current_lower and current_rsi < config.RSI_OVERSOLD:
+    # ── BUY Logic ──
+    # Trigger BUY when RSI Z-score indicates oversold (Z < -threshold)
+    # and price is below SMA (accumulation zone)
+    if current_rsi_z < -config.RSI_Z_THRESHOLD and current_price < current_sma:
         if is_held:
-            log.info(f"{pair}: BUY signal suppressed — existing position held")
-            return "HOLD"
+            log.info(f"{pair}: BUY signal suppressed — existing position held (use tranche logic in scheduler)")
+            return "HOLD", metadata
+        
+        # Calculate sigma level for this price deviation
+        # Used for tranche buying: different quantities at different price levels
+        if current_sma > 0:
+            std_dev = (current_sma - current_lower) / config.BB_STD_DEV if config.BB_STD_DEV > 0 else 1
+            if std_dev > 0:
+                sigma_level = (current_sma - current_price) / std_dev
+                metadata['sigma_level'] = float(sigma_level)
+            else:
+                sigma_level = 0
+        
         log.info(
-            f"{pair}: BUY signal — "
-            f"price={current_price:.2f} lowerBB={current_lower:.2f} "
-            f"RSI={current_rsi:.1f}"
+            f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD}) "
+            f"price={current_price:.2f} SMA={current_sma:.2f}"
         )
-        return "BUY"
+        return "BUY", metadata
 
-    # SELL: price above upper band AND RSI overbought.
-    # Only sell if we consider this a valid held asset (non-dust).
-    if current_price > current_upper and current_rsi > config.RSI_OVERBOUGHT:
+    # ── SELL Logic ──
+    # Trigger SELL when RSI Z-score indicates overbought (Z > threshold)
+    # and only if we have a position
+    if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
         if not is_held:
             log.info(f"{pair}: SELL signal suppressed — position below dust threshold")
-            return "HOLD"
+            return "HOLD", metadata
+        
         log.info(
-            f"{pair}: SELL signal — "
-            f"price={current_price:.2f} upperBB={current_upper:.2f} "
-            f"RSI={current_rsi:.1f}"
+            f"{pair}: SELL signal — Z_RSI={current_rsi_z:.2f} (> {config.RSI_Z_THRESHOLD}) "
+            f"price={current_price:.2f} SMA={current_sma:.2f}"
         )
-        return "SELL"
+        return "SELL", metadata
 
-    return "HOLD"
+    return "HOLD", metadata

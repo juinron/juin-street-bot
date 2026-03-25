@@ -4,6 +4,7 @@ import json
 import os
 import logging
 import time
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from typing import Tuple
 
@@ -22,6 +23,8 @@ class PortfolioManager:
         self.yesterday_close = 0 # daily close for daily loss limit
         self._pair_rules = {}     # {pair: {"price_precision", "amount_precision", "mini_order"}}
         self._pair_rules_ts = 0.0 # last exchangeInfo refresh time
+        self.position_quantities = {}  # {coin: total_qty} — track quantity for each position
+        self.tranche_allocations = {}  # {coin: [list of tranche dicts]} — record each tranche separately
         self._load_state()
 
     def get_pair_rules(self, client, refresh_after_seconds: float = 3600) -> dict:
@@ -66,6 +69,8 @@ class PortfolioManager:
             self.starting_value = state.get("starting_value", 0)
             self.peak_value = state.get("peak_value", 0)
             self.yesterday_close = state.get("yesterday_close", 0)
+            self.position_quantities = state.get("position_quantities", {})
+            self.tranche_allocations = state.get("tranche_allocations", {})
             log.info(f"State restored: peak={self.peak_value:.2f}, "
                      f"positions={list(self.entry_prices.keys())}")
         except Exception as e:
@@ -78,6 +83,8 @@ class PortfolioManager:
             "starting_value": self.starting_value,
             "peak_value": self.peak_value,
             "yesterday_close": self.yesterday_close,
+            "position_quantities": self.position_quantities,
+            "tranche_allocations": self.tranche_allocations,
         }
         with open(config.STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
@@ -111,6 +118,8 @@ class PortfolioManager:
         log.debug(f"Ticker data keys: {list(ticker_data.get('Data', {}).keys())}")
 
         prices = {}
+        max_bids = {}
+        min_asks = {}
         asset_values = {}
         balances = {}
         held_assets = set()
@@ -125,7 +134,12 @@ class PortfolioManager:
 
             ticker = ticker_data.get("Data", {}).get(pair, {})
             last_price = ticker.get("LastPrice", 0)
+            max_bid = ticker.get("MaxBid", last_price)  # fallback to last_price if not available
+            min_ask = ticker.get("MinAsk", last_price)
+            
             prices[pair] = last_price
+            max_bids[pair] = max_bid
+            min_asks[pair] = min_ask
 
             if not ticker:
                 log.warning(f"{pair}: not found in ticker data — pair may not be listed")
@@ -162,6 +176,8 @@ class PortfolioManager:
             "usd_cash": usd_cash,
             "balances": balances,
             "prices": prices,
+            "max_bid": max_bids,
+            "min_ask": min_asks,
             "asset_values": asset_values,
             "held_assets": held_assets,
         }
@@ -240,6 +256,84 @@ class PortfolioManager:
         quantity = spend_used / price if price > 0 else 0
         return quantity, spend_used
 
+    def calculate_tranche_quantity(
+        self,
+        pair: str,
+        price: float,
+        portfolio: dict,
+        sigma_level: float,
+        available_usd: float = None,
+    ) -> Tuple[float, float, float]:
+        """
+        Calculate quantity for tranche buying based on price deviation from SMA.
+        
+        Returns: (quantity, spend_used_usd, tranche_allocation_pct)
+        
+        Logic:
+        - If price is at 2-sigma: allocate TRANCHE_LEVELS[2] of target allocation
+        - If price is at 2.5-sigma: allocate TRANCHE_LEVELS[2.5] of target allocation
+        - etc.
+        - Respects MAX_ASSET_ALLOCATION_PCT limit
+        """
+        total = portfolio["total_value"]
+        usd_cash = portfolio["usd_cash"]
+        coin = pair.split("/")[0]
+        
+        if price <= 0:
+            return 0, 0, 0
+        
+        # Determine tranche level (round sigma to nearest discrete level)
+        # e.g., if TRANCHE_LEVELS = {2: 0.05, 2.5: 0.05, 3: 0.05}
+        # and sigma_level = 2.3, use level 2 (5% allocation)
+        tranche_pct = 0
+        matched_sigma = None
+        for level in sorted(config.TRANCHE_LEVELS.keys()):
+            if sigma_level >= level:
+                tranche_pct = config.TRANCHE_LEVELS[level]
+                matched_sigma = level
+        
+        if tranche_pct <= 0:
+            log.debug(f"{pair}: sigma_level={sigma_level:.2f} doesn't match any tranche level")
+            return 0, 0, 0
+        
+        # Calculate allocation for this tranche
+        current_value = portfolio["asset_values"].get(pair, 0)
+        current_pct = current_value / total if total > 0 else 0
+        
+        # Don't exceed max allocation
+        if current_pct + tranche_pct > config.MAX_ASSET_ALLOCATION_PCT:
+            remaining_alloc = max(0, config.MAX_ASSET_ALLOCATION_PCT - current_pct)
+            tranche_pct = min(tranche_pct, remaining_alloc)
+        
+        if tranche_pct <= 0:
+            log.info(f"{pair}: already at max allocation ({current_pct:.1%}), no tranche buy")
+            return 0, 0, 0
+        
+        # Calculate spend for this tranche
+        tranche_usd = total * tranche_pct
+        
+        # Respect minimum trade size
+        if tranche_usd < config.MIN_TRADE_USD:
+            log.debug(f"{pair}: tranche spend ${tranche_usd:.2f} below MIN_TRADE_USD")
+            return 0, 0, 0
+        
+        # Respect cash buffer
+        min_cash = total * config.CASH_BUFFER_PCT
+        available = (available_usd if available_usd is not None else (usd_cash - min_cash))
+        if available <= 0:
+            log.info(f"Cash buffer would be breached, skipping tranche for {pair}")
+            return 0, 0, 0
+        
+        spend_used = min(tranche_usd, available)
+        quantity = spend_used / price
+        
+        log.info(
+            f"{pair}: tranche buy at sigma={matched_sigma} "
+            f"allocating {tranche_pct:.1%} (${spend_used:.2f}) qty={quantity:.8f}"
+        )
+        
+        return quantity, spend_used, tranche_pct
+
     def calculate_rebalance_trades(self, portfolio: dict) -> list:
         """Compare actual vs target allocations, return needed trades.
         Returns list of dicts: {pair, side, quantity, price, reason}
@@ -304,14 +398,51 @@ class PortfolioManager:
 
         return trades
 
-    def record_entry(self, coin: str, new_qty: float, new_price: float, current_qty: float):
-        """Record entry price after a buy is filled, using weighted average price."""
+    def record_entry(self, coin: str, new_qty: float, new_price: float, current_qty: float, sigma_level: float = None):
+        """Record entry price after a buy is filled, using weighted average price.
+        
+        Supports tranche buying:
+        - Each fill is recorded with its price
+        - Weighted average is maintained across all tranches
+        - sigma_level tracks which deviation level triggered this tranche
+        
+        Args:
+            coin: Asset symbol (e.g., 'BTC')
+            new_qty: Quantity purchased in this fill
+            new_price: Price at which this fill executed
+            current_qty: Current portfolio quantity (before this fill)
+            sigma_level: Statistical deviation level (for tranche tracking)
+        """
         old_price = self.entry_prices.get(coin, 0)
+        
+        # Initialize tranche record if not present
+        if coin not in self.tranche_allocations:
+            self.tranche_allocations[coin] = []
+        
+        # Record this tranche
+        tranche_record = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'quantity': new_qty,
+            'price': new_price,
+            'sigma_level': sigma_level,
+        }
+        self.tranche_allocations[coin].append(tranche_record)
+        
+        # Weighted average entry price across all tranches
         if current_qty > 0 and old_price > 0:
             total_cost = (current_qty * old_price) + (new_qty * new_price)
             self.entry_prices[coin] = total_cost / (current_qty + new_qty)
         else:
             self.entry_prices[coin] = new_price
+        
+        # Track position quantity
+        self.position_quantities[coin] = current_qty + new_qty
+        
+        log.info(
+            f"Recorded entry for {coin}: new_qty={new_qty:.8f} new_price={new_price:.2f} "
+            f"wgt_avg={self.entry_prices[coin]:.2f} total_qty={self.position_quantities[coin]:.8f}"
+        )
+        
         self.save_state()
 
     def clear_entry(self, coin: str):
