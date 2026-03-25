@@ -1,6 +1,7 @@
 """Risk Manager — stop-loss, circuit breaker, daily loss limit, max drawdown."""
 
 import logging
+import time
 
 import config
 
@@ -15,6 +16,7 @@ class RiskManager:
         self.circuit_breaker_active = False
         self.daily_loss_active = False
         self.halted = False  # max drawdown halt
+        self.last_stop_loss_time = {}  # {coin: timestamp} — track when stop-loss was triggered
 
     def check_stop_loss(self, coin: str, current_price: float, atr: float = None) -> bool:
         """Returns True if stop-loss triggered.
@@ -44,6 +46,8 @@ class RiskManager:
                     f"entry={entry:.2f} current={current_price:.2f} "
                     f"atr={atr:.4f} stop_level={stop_loss_price:.2f} loss={loss_pct:.2%}"
                 )
+                # Record stop-loss timestamp for cooldown tracking
+                self.last_stop_loss_time[coin] = time.time()
                 return True
         else:
             # Fallback to legacy 4% stop-loss if ATR not available
@@ -54,6 +58,8 @@ class RiskManager:
                     f"STOP-LOSS triggered for {coin} (legacy 4% mode): "
                     f"entry={entry:.2f} current={current_price:.2f} loss={loss_pct:.2%}"
                 )
+                # Record stop-loss timestamp for cooldown tracking
+                self.last_stop_loss_time[coin] = time.time()
                 return True
 
         return False
@@ -98,6 +104,36 @@ class RiskManager:
 
         return self.daily_loss_active
 
+    def check_stop_loss_cooldown(self, coin: str) -> bool:
+        """Returns True if the asset is still in cooldown after a stop-loss.
+        
+        After a stop-loss is triggered, no buys are allowed for that asset
+        for STOP_LOSS_COOLDOWN_MINUTES to prevent re-entry at unfavorable prices.
+        
+        Args:
+            coin: Asset identifier (e.g., 'BTC')
+        
+        Returns:
+            True if still in cooldown (buy should be blocked)
+        """
+        if coin not in self.last_stop_loss_time:
+            return False
+        
+        elapsed_seconds = time.time() - self.last_stop_loss_time[coin]
+        cooldown_seconds = config.STOP_LOSS_COOLDOWN_MINUTES * 60
+        
+        if elapsed_seconds < cooldown_seconds:
+            minutes_remaining = (cooldown_seconds - elapsed_seconds) / 60
+            log.info(
+                f"{coin}: stop-loss cooldown active ({minutes_remaining:.1f}m remaining), skipping buy"
+            )
+            return True
+        else:
+            # Cooldown expired, remove the record
+            del self.last_stop_loss_time[coin]
+            log.info(f"{coin}: stop-loss cooldown expired, buys re-enabled")
+            return False
+
     def check_max_drawdown(self, current_value: float) -> bool:
         """Returns True if all trading should halt (>15% below peak)."""
         if self.pm.peak_value <= 0:
@@ -117,8 +153,16 @@ class RiskManager:
 
         return False
 
-    def can_buy(self, current_value: float) -> bool:
-        """Check all risk gates — returns True if buying is allowed."""
+    def can_buy(self, current_value: float, coin: str = None) -> bool:
+        """Check all risk gates — returns True if buying is allowed.
+        
+        Args:
+            current_value: Current portfolio value
+            coin: Optional asset identifier to check per-asset stop-loss cooldown
+        
+        Returns:
+            True if buying is permitted for this asset/portfolio
+        """
         if self.halted:
             log.info("Trading halted due to max drawdown — no buys")
             return False
@@ -127,6 +171,9 @@ class RiskManager:
             return False
         if self.check_daily_loss(current_value):
             log.info("Daily loss limit active — no buys")
+            return False
+        if coin and self.check_stop_loss_cooldown(coin):
+            # Per-asset cooldown after stop-loss
             return False
         return True
 

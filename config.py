@@ -24,7 +24,7 @@ RSI_OVERBOUGHT = 60
 
 # Dynamic ATR-based risk management (replaces static STOP_LOSS_PCT)
 ATR_PERIOD = 14             # rolling window for ATR calculation
-ATR_MULTIPLIER = 2.0        # stop-loss at entry_price - (k * ATR)
+ATR_MULTIPLIER = 3.5        # stop-loss at entry_price - (k * ATR)
 
 # Volatility-adjusted RSI thresholds (replaces static RSI_OVERSOLD/OVERBOUGHT)
 RSI_Z_PERIOD = 20           # rolling window for RSI mean/std calculation
@@ -50,6 +50,7 @@ CIRCUIT_BREAKER_PAUSE_PCT = 0.10   # pause buys if portfolio drops 10% from star
 CIRCUIT_BREAKER_RESUME_PCT = 0.08  # resume buys when within 8% of start
 DAILY_LOSS_LIMIT_PCT = 0.05        # no buys if down 5% vs yesterday close
 MAX_DRAWDOWN_PCT = 0.15            # halt all trading if 15% below peak
+STOP_LOSS_COOLDOWN_MINUTES = 30    # no buys for 30 minutes after stop-loss triggered on an asset
 
 # Spread-aware order execution (replaces static offsets)
 # Quotes limit orders slightly inside the bid-ask spread to act as maker

@@ -310,7 +310,7 @@ def _signal_loop_inner(
             log.info(f"{pair}: skipping SELL — coin not considered held (dust threshold)")
             continue
 
-        if signal == "BUY" and rm.can_buy(total_value):
+        if signal == "BUY" and rm.can_buy(total_value, coin):
             rules = pair_rules.get(pair, {})
             price_precision = rules.get("price_precision", 4)
             amount_precision = rules.get("amount_precision", 6)
