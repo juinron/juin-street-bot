@@ -99,6 +99,67 @@ def execute_stop_losses(
                 )
 
 
+def liquidate_dust_positions(
+    client: RoostooClient,
+    pm: PortfolioManager,
+    portfolio: dict,
+    trade_logger: TradeLogger,
+    pair_rules: dict,
+):
+    """Convert dust (< DUST_THRESHOLD_USD) holdings to USD to prevent accumulation."""
+    if not config.DUST_SELL_ENABLED:
+        return
+
+    dust_candidates = pm.get_dust_candidates(portfolio)
+    for candidate in dust_candidates:
+        pair = candidate["pair"]
+        coin = candidate["coin"]
+        quantity = candidate["quantity"]
+        price = candidate["price"]
+
+        rules = pair_rules.get(pair, {})
+        amount_precision = rules.get("amount_precision", 6)
+        quantity = pm.floor_to_precision(quantity, int(amount_precision))
+
+        if quantity <= 0:
+            continue
+
+        mini_order = float(rules.get("mini_order", 0) or 0)
+        if mini_order and (quantity * price) < mini_order:
+            log.debug(f"{pair}: dust ${candidate['usd_value']:.2f} below mini_order, skipping")
+            continue
+
+        log.info(f"{pair}: liquidating dust {quantity:.8f} ({candidate['usd_value']:.2f} USD)")
+        result = client.place_order(
+            pair,
+            "SELL",
+            quantity,
+            order_type=config.DUST_SELL_ORDER_TYPE,
+        )
+
+        if result and result.get("Success"):
+            detail = result.get("OrderDetail", {})
+            trade_logger.log(
+                asset=pair,
+                action="SELL",
+                order_type=config.DUST_SELL_ORDER_TYPE,
+                quantity=quantity,
+                price=detail.get("FilledAverPrice", price),
+                order_id=str(detail.get("OrderID", "")),
+                status=detail.get("Status", ""),
+                reason="Dust cleanup",
+                portfolio_value=portfolio.get("total_value", 0),
+            )
+            pm.clear_entry(coin)
+        else:
+            trade_logger.log(
+                asset=pair,
+                action="ERROR",
+                reason="Dust cleanup sell failed",
+                portfolio_value=portfolio.get("total_value", 0),
+            )
+
+
 def signal_loop(
     client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
     trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
@@ -145,6 +206,9 @@ def _signal_loop_inner(
 
     # Fetch precision rules once per run (cached inside PortfolioManager)
     pair_rules = pm.get_pair_rules(client)
+
+    # Liquidate dust positions before main signal trading, to prevent accumulation
+    liquidate_dust_positions(client, pm, portfolio, trade_logger, pair_rules)
 
     # Execute stop-losses first
     execute_stop_losses(client, pm, rm, portfolio, trade_logger, pair_rules)

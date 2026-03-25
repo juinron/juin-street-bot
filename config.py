@@ -66,6 +66,9 @@ BINANCE_SYMBOL_MAP = {
 # Treats tiny residual assets (e.g. 0.01 ETH) as non-held for signal filtering.
 MIN_TRADE_USD = 10.0
 DUST_THRESHOLD_USD = 10.0
+# Optionally liquidate dust positions (to prevent accumulation over time)
+DUST_SELL_ENABLED = True
+DUST_SELL_ORDER_TYPE = "MARKET"  # use MARKET for simplest, or LIMIT if desired
 
 # File paths
 TRADES_LOG_FILE = "trades_log.csv"

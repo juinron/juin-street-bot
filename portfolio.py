@@ -166,6 +166,33 @@ class PortfolioManager:
             "held_assets": held_assets,
         }
 
+    def get_dust_candidates(self, portfolio: dict) -> list:
+        """Return dust-sized coin entries that can be cleaned up.
+
+        dust candidates are positive balances whose USD value is below DUST_THRESHOLD_USD.
+        """
+        candidates = []
+        balances = portfolio.get("balances", {})
+        prices = portfolio.get("prices", {})
+
+        for pair in config.ASSETS:
+            coin = pair.split("/")[0]
+            qty = balances.get(coin, 0)
+            price = prices.get(pair, 0)
+            if qty <= 0 or price <= 0:
+                continue
+            usd_value = qty * price
+            if usd_value > 0 and usd_value <= config.DUST_THRESHOLD_USD:
+                candidates.append({
+                    "pair": pair,
+                    "coin": coin,
+                    "quantity": qty,
+                    "price": price,
+                    "usd_value": usd_value,
+                })
+
+        return candidates
+
     def get_allocation_pct(self, pair: str, portfolio: dict) -> float:
         """Current allocation percentage for an asset."""
         total = portfolio.get("total_value", 0)
@@ -193,6 +220,13 @@ class PortfolioManager:
         spend = target_usd - current_value
 
         if spend <= 0:
+            return 0, 0
+
+        # Avoid creating a tiny purchase that later becomes dust.
+        if spend < config.MIN_TRADE_USD:
+            log.info(
+                f"calculate_buy_quantity: spend ${spend:.2f} below MIN_TRADE_USD={config.MIN_TRADE_USD}, skip"
+            )
             return 0, 0
 
         # Respect cash buffer (optionally override with a shared "remaining cash" during a run)
