@@ -106,7 +106,9 @@ class PortfolioManager:
             return {}
 
         wallet = balance_data.get("SpotWallet", balance_data.get("Wallet", {}))
-        usd_cash = wallet.get("USD", {}).get("Free", 0)
+        usd_free = wallet.get("USD", {}).get("Free", 0)
+        usd_locked = wallet.get("USD", {}).get("Lock", 0)
+        usd_cash = usd_free + usd_locked # Total USD value
         log.debug(f"Wallet data: {wallet}")
 
         # Fetch current prices
