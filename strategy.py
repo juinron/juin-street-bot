@@ -298,6 +298,14 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
     coin = pair.split("/")[0]
     is_held = coin in held_assets
 
+    # ── SELL RISK CONTROL (stop-loss) ──
+    # If we are already holding and price falls below entry - ATR_MULTIPLIER * ATR, force sell.
+    if is_held and entry_price is not None:
+        stop_loss_price = entry_price - (current_atr * config.ATR_MULTIPLIER)
+        if current_price < stop_loss_price:
+            log.warning(f"{pair}: STOP-LOSS TRIGGERED at {current_price:.4f} < {stop_loss_price:.4f}")
+            return "SELL", metadata
+
     # ── BUY Logic ──
     # Requires: oversold Z-RSI + price below BB SMA + price above trend SMA (FIX 4)
     if (
