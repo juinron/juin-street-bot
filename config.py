@@ -73,7 +73,7 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "15m"
+CANDLE_INTERVAL = "5m"
 ATR_CANDLE_INTERVAL = "15m"  # ATR uses 15-minute buckets to reduce noise sensitivity
 CANDLE_BOOTSTRAP_COUNT = 200
 
