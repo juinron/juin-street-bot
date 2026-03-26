@@ -202,6 +202,13 @@ class PortfolioManager:
         portfolio: dict,
         available_usd: float = None,
     ) -> tuple:
+        """Scale-In (DCA) strategy: buy fixed signal size until ceiling is hit.
+        
+        Each BUY signal intends to buy a fixed percentage (SIGNAL_SIZES[pair]).
+        The allocation ceiling (MAX_ASSET_ALLOCATION_PCT) prevents overconcentration.
+        
+        Returns: (quantity, spend_used)
+        """
         total = portfolio.get("total_value", 0)
         usd_cash = portfolio.get("usd_cash", 0)
         if total <= 0 or price <= 0:
@@ -211,28 +218,32 @@ class PortfolioManager:
         if target_pct <= 0:
             return 0, 0
 
-        target_value = total * target_pct
+        # 1. The bot ALWAYS wants to buy the full signal size
+        intended_buy_usd = total * target_pct
+
+        # 2. Check current allocation against the absolute ceiling
         current_value = portfolio.get("asset_values", {}).get(pair, 0)
-        buy_usd = target_value - current_value
-
-        if buy_usd <= 0:
-            return 0, 0
-
         current_pct = current_value / total if total > 0 else 0
+        
         max_pct = config.MAX_ASSET_ALLOCATION_PCT
         remaining_pct = max(0.0, max_pct - current_pct)
 
+        # If we are already at or above 20%, stop here.
         if remaining_pct <= 0:
             return 0, 0
 
+        # 3. We buy the intended amount, OR whatever room is left before the ceiling
         max_allowed_usd = total * remaining_pct
-        buy_usd = min(buy_usd, max_allowed_usd)
+        buy_usd = min(intended_buy_usd, max_allowed_usd)
 
+        # 4. Enforce minimum trade limits
         if buy_usd < config.MIN_TRADE_USD:
             return 0, 0
 
+        # 5. Check available cash (respecting the 10% cash buffer)
         min_cash = total * config.CASH_BUFFER_PCT
         available = (available_usd if available_usd is not None else (usd_cash - min_cash))
+        
         if available <= 0:
             return 0, 0
 
