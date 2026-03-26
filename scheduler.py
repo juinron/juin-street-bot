@@ -47,12 +47,13 @@ def calculate_spread_aware_limit_price(
     Returns:
         Limit price as float, rounded to price precision
     """
+    tick_increment = tick_size * (10 ** -price_precision)
     if side.upper() == "BUY":
-        # Buy at bid + tick, but not above mid-price
-        limit_price = min(max_bid + tick_size / (10 ** price_precision), mid_price)
+        # Buy at bid + one tick, but not above mid-price
+        limit_price = min(max_bid + tick_increment, mid_price)
     else:  # SELL
-        # Sell at ask - tick, but not below mid-price
-        limit_price = max(min_ask - tick_size / (10 ** price_precision), mid_price)
+        # Sell at ask - one tick, but not below mid-price
+        limit_price = max(min_ask - tick_increment, mid_price)
     
     # Round to price precision
     limit_price = PortfolioManager.floor_to_precision(limit_price, price_precision)
@@ -290,6 +291,10 @@ def _signal_loop_inner(
     for pair in config.ASSETS:
         coin = pair.split("/")[0]
         signal, metadata = compute_signal(pair, portfolio["held_assets"])
+
+        # FIX 1: Extract sigma_level from metadata before use
+        sigma_level = metadata.get("sigma_level")
+
         price = portfolio["prices"].get(pair, 0)
         max_bid = portfolio.get("max_bid", {}).get(pair, price)
         min_ask = portfolio.get("min_ask", {}).get(pair, price)
@@ -312,13 +317,13 @@ def _signal_loop_inner(
             rules = pair_rules.get(pair, {})
             price_precision = rules.get("price_precision", 4)
             amount_precision = rules.get("amount_precision", 6)
-            
-                # Tiered fixed allocation buy
+
+            # Tiered fixed allocation buy
             buy_qty, spend_used = pm.calculate_tiered_fixed_quantity(
                 pair, price, portfolio, available_usd=available_usd
             )
             buy_reason = "Tiered fixed-fractional buy (SIGNAL_SIZES)"
-            
+
             if buy_qty <= 0 or spend_used <= 0:
                 continue
 
@@ -364,8 +369,8 @@ def _signal_loop_inner(
                 if detail.get("Status") == "FILLED":
                     filled_price = detail.get("FilledAverPrice", limit_price)
                     current_qty = portfolio["balances"].get(coin, 0)
+                    # FIX 1: sigma_level is now correctly defined above
                     pm.record_entry(coin, quantity, filled_price, current_qty, sigma_level=sigma_level)
-                    # Note: we already reserved cash with the limit_price estimate.
 
                 # Reserve cash for the order so later BUYs in this loop can't overdraft.
                 available_usd = max(0.0, available_usd - (quantity * limit_price))

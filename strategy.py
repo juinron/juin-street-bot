@@ -14,15 +14,7 @@ log = logging.getLogger(__name__)
 
 
 def bootstrap_price_history(client) -> None:
-    """Fetch historical candles from Binance and seed price_history.csv.
-
-    Called once on startup so the strategy has enough data points
-    (BB_PERIOD=20) to immediately generate signals without waiting
-    for additional snapshots to accumulate.
-
-    Args:
-        client: RoostooClient instance (used for its get_klines method).
-    """
+    """Fetch historical candles from Binance and seed price_history.csv."""
     log.info("Bootstrapping price history from Binance...")
 
     rows = []
@@ -42,7 +34,6 @@ def bootstrap_price_history(client) -> None:
             continue
 
         for candle in candles:
-            # Convert Binance close_time (ms) to ISO timestamp
             close_ts = datetime.fromtimestamp(
                 candle["close_time"] / 1000, tz=timezone.utc
             ).isoformat()
@@ -52,15 +43,13 @@ def bootstrap_price_history(client) -> None:
             ])
 
         log.info(
-            f"{pair}: bootstrapped {len(candles)} candles from Binance "
-            f"({binance_symbol})"
+            f"{pair}: bootstrapped {len(candles)} candles from Binance ({binance_symbol})"
         )
 
     if not rows:
         log.warning("No candles bootstrapped — strategy will wait for live data")
         return
 
-    # Overwrite price_history.csv with fresh bootstrapped data
     with open(config.PRICE_HISTORY_FILE, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "pair", "last_price", "max_bid", "min_ask"])
@@ -70,16 +59,7 @@ def bootstrap_price_history(client) -> None:
 
 
 def collect_price_snapshot(client) -> dict:
-    """Fetch current ticker for all assets and append to price_history.csv.
-    
-    Records: timestamp, pair, last_price, max_bid, min_ask
-    
-    max_bid and min_ask are used for:
-    - Spread-aware order execution (quoting inside the spread)
-    - ATR high/low proxies for volatility calculation
-    
-    Returns dict of {pair: last_price} for convenience.
-    """
+    """Fetch current ticker for all assets and append to price_history.csv."""
     ticker_data = client.get_ticker()
     if not ticker_data or not ticker_data.get("Success"):
         log.warning("Failed to fetch ticker data for price snapshot")
@@ -98,12 +78,10 @@ def collect_price_snapshot(client) -> dict:
             data = ticker_data.get("Data", {}).get(pair)
             if data:
                 last_price = data.get("LastPrice", 0)
-                max_bid = data.get("MaxBid", last_price)  # fallback to last_price if not available
+                max_bid = data.get("MaxBid", last_price)
                 min_ask = data.get("MinAsk", last_price)
                 prices[pair] = last_price
-                writer.writerow([
-                    now, pair, last_price, max_bid, min_ask,
-                ])
+                writer.writerow([now, pair, last_price, max_bid, min_ask])
 
     log.info(f"Price snapshot collected: {prices}")
     return prices
@@ -122,7 +100,7 @@ def load_price_history(pair: str) -> pd.DataFrame:
 
 
 def compute_bollinger_bands(prices: pd.Series) -> tuple:
-    """Calculate upper band, lower band, and SMA for the given price series."""
+    """Calculate upper band, lower band, and SMA."""
     sma = prices.rolling(window=config.BB_PERIOD).mean()
     std = prices.rolling(window=config.BB_PERIOD).std()
     upper = sma + config.BB_STD_DEV * std
@@ -146,80 +124,83 @@ def compute_rsi(prices: pd.Series, period: int = None) -> pd.Series:
 
 
 def compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = None) -> pd.Series:
-    """Calculate Average True Range (ATR) using exponential moving average.
-    
-    ATR measures volatility. Used for dynamic stop-loss calculation:
-    stop_loss = entry_price - (ATR_MULTIPLIER * current_atr)
-    """
+    """Calculate Average True Range (ATR) using exponential moving average."""
     period = period or config.ATR_PERIOD
-    
-    # True Range = max(high - low, abs(high - prev_close), abs(low - prev_close))
+
     hl = high - low
     hc = (high - close.shift(1)).abs()
     lc = (low - close.shift(1)).abs()
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    
-    # Exponential moving average of TR
+
     atr = tr.ewm(alpha=1 / period, min_periods=period).mean()
     return atr
 
 
 def compute_rsi_zscore(rsi: pd.Series, period: int = None) -> pd.Series:
-    """Calculate rolling Z-score of RSI to detect overbought/oversold extremes.
-    
-    Z_RSI = (RSI_t - mean(RSI)) / std(RSI)
-    
-    Dynamic thresholds:
-    - BUY signal: Z_RSI < -RSI_Z_THRESHOLD (oversold)
-    - SELL signal: Z_RSI > RSI_Z_THRESHOLD (overbought)
-    
-    Replaces static RSI 40/60 thresholds, which don't adapt to market regime.
-    """
+    """Calculate rolling Z-score of RSI to detect overbought/oversold extremes."""
     period = period or config.RSI_Z_PERIOD
-    
+
     mean_rsi = rsi.rolling(window=period, min_periods=period).mean()
     std_rsi = rsi.rolling(window=period, min_periods=period).std()
-    
-    # Avoid division by zero; if std is 0, set zscore to 0
+
     z_score = (rsi - mean_rsi) / std_rsi.replace(0, np.nan)
     return z_score
 
 
-def compute_signal(pair: str, held_assets: set) -> tuple:
-    """Evaluate dynamic signal for an asset using Bollinger Bands, RSI Z-Score, and ATR.
+def compute_trend_sma(prices: pd.Series, period: int = None) -> pd.Series:
+    """Calculate a long-period SMA used as a trend filter.
     
+    FIX 4: Added trend filter to prevent buying into downtrends.
+    Period defaults to config.TREND_SMA_PERIOD (50 by default).
+    """
+    period = period or config.TREND_SMA_PERIOD
+    return prices.rolling(window=period).mean()
+
+
+def compute_signal(pair: str, held_assets: set) -> tuple:
+    """Evaluate dynamic signal using Bollinger Bands, RSI Z-Score, ATR, and trend filter.
+
     Returns: (signal, metadata_dict)
     signal: 'BUY', 'SELL', or 'HOLD'
     metadata_dict: {
         'rsi_zscore': float,
         'atr': float,
-        'sigma_level': float or None,  # how many sigmas below mean (for tranche buying)
+        'sigma_level': float or None,
         'bb_upper': float,
         'bb_lower': float,
         'bb_sma': float,
+        'trend_sma': float,       # FIX 4: added
+        'trend_filter_pass': bool, # FIX 4: added — True if price is above trend SMA
     }
-    
-    BUY signals support tranche buying:
-    - Any buy triggered by Z_RSI < -threshold gets a tranche level based on price deviation from SMA
-    
-    SELL signals require Z_RSI > threshold AND existing position
+
+    BUY conditions (ALL must be true):
+        1. RSI Z-score < -RSI_Z_THRESHOLD  (oversold)
+        2. Price < BB SMA                  (below mean)
+        3. Price > trend SMA               (FIX 4: uptrend filter — avoids catching falling knives)
+
+    SELL conditions (ALL must be true):
+        1. RSI Z-score > RSI_Z_THRESHOLD   (overbought)
+        2. Price > BB SMA                  (above mean)
+        3. Coin is held
     """
     df = load_price_history(pair)
 
-    # Need enough data for all indicators
-    min_period = max(config.BB_PERIOD, config.RSI_PERIOD, config.RSI_Z_PERIOD, config.ATR_PERIOD)
+    # Need enough data for all indicators including trend SMA
+    min_period = max(
+        config.BB_PERIOD, config.RSI_PERIOD,
+        config.RSI_Z_PERIOD, config.ATR_PERIOD,
+        config.TREND_SMA_PERIOD,
+    )
     if len(df) < min_period:
         log.info(f"{pair}: insufficient data ({len(df)}/{min_period}), holding")
         return "HOLD", {}
 
-    # Use last 200 data points
-    df = df.tail(200).copy()
+    df = df.tail(max(200, config.TREND_SMA_PERIOD + 50)).copy()
     close = df["last_price"].astype(float)
-    high = df["max_bid"].astype(float)  # use bid as high proxy if available
-    low = df["min_ask"].astype(float)   # use ask as low proxy if available
-    
-    # Fallback to close price if bid/ask not available
-    if high.abs().sum() < 1e-10:  # all zeros or NaN
+    high = df["max_bid"].astype(float)
+    low = df["min_ask"].astype(float)
+
+    if high.abs().sum() < 1e-10:
         high = close
     if low.abs().sum() < 1e-10:
         low = close
@@ -228,6 +209,7 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
     rsi = compute_rsi(close)
     atr = compute_atr(high, low, close)
     rsi_zscore = compute_rsi_zscore(rsi)
+    trend_sma = compute_trend_sma(close)  # FIX 4
 
     current_price = close.iloc[-1]
     current_upper = upper.iloc[-1]
@@ -236,11 +218,14 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
     current_rsi = rsi.iloc[-1]
     current_rsi_z = rsi_zscore.iloc[-1]
     current_atr = atr.iloc[-1]
+    current_trend_sma = trend_sma.iloc[-1]  # FIX 4
 
-    # Skip if indicators are NaN (insufficient data for calculation)
-    if pd.isna(current_upper) or pd.isna(current_rsi_z) or pd.isna(current_atr):
+    if pd.isna(current_upper) or pd.isna(current_rsi_z) or pd.isna(current_atr) or pd.isna(current_trend_sma):
         log.info(f"{pair}: indicators not ready, holding")
         return "HOLD", {}
+
+    # FIX 4: trend filter — True means price is in an uptrend
+    trend_filter_pass = current_price > current_trend_sma
 
     metadata = {
         'rsi_zscore': float(current_rsi_z),
@@ -249,10 +234,13 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
         'bb_lower': float(current_lower),
         'bb_sma': float(current_sma),
         'sigma_level': None,
+        'trend_sma': float(current_trend_sma),         # FIX 4
+        'trend_filter_pass': bool(trend_filter_pass),  # FIX 4
     }
 
     log.info(
         f"{pair}: price={current_price:.4f} SMA={current_sma:.4f} "
+        f"TrendSMA={current_trend_sma:.4f} trend_pass={trend_filter_pass} "
         f"RSI={current_rsi:.1f} RSI_Z={current_rsi_z:.2f} ATR={current_atr:.4f}"
     )
 
@@ -260,34 +248,41 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
     is_held = coin in held_assets
 
     # ── BUY Logic ──
-    # Trigger BUY when RSI Z-score indicates oversold (Z < -threshold)
-    # and price is below SMA (accumulation zone).
-    # Buys are allowed for both new and held positions (up to MAX_ASSET_ALLOCATION_PCT).
-    if current_rsi_z < -config.RSI_Z_THRESHOLD and current_price < current_sma:
-        # Calculate sigma level for this price deviation
-        # Used for tranche buying: different quantities at different price levels
+    # Requires: oversold Z-RSI + price below BB SMA + price above trend SMA (FIX 4)
+    if (
+        current_rsi_z < -config.RSI_Z_THRESHOLD
+        and current_price < current_sma
+        and trend_filter_pass  # FIX 4: only buy in uptrends
+    ):
         if current_sma > 0:
             std_dev = (current_sma - current_lower) / config.BB_STD_DEV if config.BB_STD_DEV > 0 else 1
             if std_dev > 0:
                 sigma_level = (current_sma - current_price) / std_dev
                 metadata['sigma_level'] = float(sigma_level)
-            else:
-                sigma_level = 0
-        
+
         log.info(
             f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD}) "
-            f"price={current_price:.4f} SMA={current_sma:.4f}"
+            f"price={current_price:.4f} SMA={current_sma:.4f} TrendSMA={current_trend_sma:.4f}"
         )
         return "BUY", metadata
 
+    # Log when trend filter blocked a BUY signal (useful for tuning)
+    if (
+        current_rsi_z < -config.RSI_Z_THRESHOLD
+        and current_price < current_sma
+        and not trend_filter_pass
+    ):
+        log.info(
+            f"{pair}: BUY signal SUPPRESSED by trend filter — "
+            f"price={current_price:.4f} below TrendSMA={current_trend_sma:.4f}"
+        )
+
     # ── SELL Logic ──
-    # Trigger SELL when RSI Z-score indicates overbought (Z > threshold)
-    # and only if we have a position
     if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
         if not is_held:
             log.info(f"{pair}: SELL signal suppressed — position below dust threshold")
             return "HOLD", metadata
-        
+
         log.info(
             f"{pair}: SELL signal — Z_RSI={current_rsi_z:.2f} (> {config.RSI_Z_THRESHOLD}) "
             f"price={current_price:.4f} SMA={current_sma:.4f}"
