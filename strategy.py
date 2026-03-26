@@ -99,6 +99,40 @@ def load_price_history(pair: str) -> pd.DataFrame:
     return df
 
 
+def load_price_history_resampled(pair: str, interval: str = "15min") -> pd.DataFrame:
+    """Load price history and resample to specified interval (e.g., '15min').
+    
+    Uses last() for last_price, max() for max_bid, min() for min_ask to properly
+    aggregate OHLC data (Close, High, Low) over the resampling interval.
+    
+    Args:
+        pair: Trading pair (e.g., 'BTC/USD')
+        interval: Resampling interval as pandas frequency string (default '15min')
+    
+    Returns:
+        Resampled DataFrame with 15-minute (or specified) candles
+    """
+    df = load_price_history(pair)
+    if df.empty:
+        return df
+    
+    # Set timestamp as index for resampling
+    df = df.set_index("timestamp")
+    
+    # Resample: last() for close, max() for high, min() for low
+    df_resampled = df.resample(interval).agg({
+        "last_price": "last",
+        "max_bid": "max",
+        "min_ask": "min",
+        "pair": "first",
+    })
+    
+    # Reset index and drop rows where no data existed in that interval
+    df_resampled = df_resampled.dropna(subset=["last_price"]).reset_index()
+    
+    return df_resampled
+
+
 def compute_bollinger_bands(prices: pd.Series) -> tuple:
     """Calculate upper band, lower band, and SMA."""
     sma = prices.rolling(window=config.BB_PERIOD).mean()
@@ -208,9 +242,24 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
 
     upper, lower, sma = compute_bollinger_bands(close)
     rsi = compute_rsi(close)
-    atr = compute_atr(high, low, close)
     rsi_zscore = compute_rsi_zscore(rsi)
     trend_sma = compute_trend_sma(close)  # FIX 4
+    
+    # Compute ATR from 15-minute resampled data to reduce noise sensitivity
+    df_atr = load_price_history_resampled(pair, interval="15min")
+    if len(df_atr) >= config.ATR_PERIOD:
+        close_atr = df_atr["last_price"].astype(float)
+        high_atr = df_atr["max_bid"].astype(float)
+        low_atr = df_atr["min_ask"].astype(float)
+        
+        if high_atr.abs().sum() < 1e-10:
+            high_atr = close_atr
+        if low_atr.abs().sum() < 1e-10:
+            low_atr = close_atr
+        
+        atr = compute_atr(high_atr, low_atr, close_atr)
+    else:
+        atr = pd.Series(np.nan, index=close.index)
 
     current_price = close.iloc[-1]
     current_upper = upper.iloc[-1]

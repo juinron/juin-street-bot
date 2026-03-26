@@ -10,7 +10,7 @@ from portfolio import PortfolioManager
 from risk_manager import RiskManager
 from strategy import (
     collect_price_snapshot, compute_signal, load_price_history,
-    compute_atr, compute_rsi_zscore, compute_rsi, compute_bollinger_bands
+    load_price_history_resampled, compute_atr, compute_rsi_zscore, compute_rsi, compute_bollinger_bands
 )
 from logger import TradeLogger, PortfolioLogger
 
@@ -106,15 +106,15 @@ def execute_stop_losses(
             continue
 
         # Compute ATR for this asset to use in dynamic stop-loss check
-        df = load_price_history(pair)
+        # Use 15-minute resampled data to reduce noise sensitivity
+        df_atr = load_price_history_resampled(pair, interval="15min")
         atr = None
         
-        if len(df) >= config.ATR_PERIOD:
+        if len(df_atr) >= config.ATR_PERIOD:
             import pandas as pd
-            df_tail = df.tail(200).copy()
-            close = df_tail["last_price"].astype(float)
-            high = df_tail["max_bid"].astype(float)
-            low = df_tail["min_ask"].astype(float)
+            close = df_atr["last_price"].astype(float)
+            high = df_atr["max_bid"].astype(float)
+            low = df_atr["min_ask"].astype(float)
             
             # Fallback if bid/ask unavailable
             if high.abs().sum() < 1e-10:

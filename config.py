@@ -27,7 +27,7 @@ ATR_PERIOD = 14             # rolling window for ATR calculation
 ATR_MULTIPLIER = 3.5        # stop-loss at entry_price - (k * ATR)
 
 # Volatility-adjusted RSI thresholds (replaces static RSI_OVERSOLD/OVERBOUGHT)
-RSI_Z_PERIOD = 40           # rolling window for RSI mean/std calculation
+RSI_Z_PERIOD = 100           # rolling window for RSI mean/std calculation
 RSI_Z_THRESHOLD = 1.6       # trigger signal when |Z_RSI| > threshold (2 sigma deviation)
 
 # FIX 4: Trend filter — only BUY when price is above this SMA (avoids catching falling knives)
@@ -73,7 +73,8 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "5m"
+CANDLE_INTERVAL = "15m"
+ATR_CANDLE_INTERVAL = "15m"  # ATR uses 15-minute buckets to reduce noise sensitivity
 CANDLE_BOOTSTRAP_COUNT = 200
 
 # Map Roostoo pairs → Binance symbols
