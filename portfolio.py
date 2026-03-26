@@ -25,6 +25,7 @@ class PortfolioManager:
         self._pair_rules_ts = 0.0
         self.position_quantities = {}
         self.tranche_allocations = {}
+        self.pending_buy_orders = {}  # Maps order_id -> {'pair': str, 'quantity': float, 'sigma_level': float}
         self._load_state()
 
     def get_pair_rules(self, client, refresh_after_seconds: float = 3600) -> dict:
@@ -68,8 +69,10 @@ class PortfolioManager:
             self.yesterday_close = state.get("yesterday_close", 0)
             self.position_quantities = state.get("position_quantities", {})
             self.tranche_allocations = state.get("tranche_allocations", {})
+            self.pending_buy_orders = state.get("pending_buy_orders", {})
             log.info(f"State restored: peak={self.peak_value:.2f}, "
-                     f"positions={list(self.entry_prices.keys())}")
+                     f"positions={list(self.entry_prices.keys())}, "
+                     f"pending_orders={list(self.pending_buy_orders.keys())}")
         except Exception as e:
             log.warning(f"Failed to load state: {e}")
 
@@ -81,6 +84,7 @@ class PortfolioManager:
             "yesterday_close": self.yesterday_close,
             "position_quantities": self.position_quantities,
             "tranche_allocations": self.tranche_allocations,
+            "pending_buy_orders": self.pending_buy_orders,
         }
         with open(config.STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
@@ -309,3 +313,26 @@ class PortfolioManager:
     def update_daily_close(self, value: float):
         self.yesterday_close = value
         self.save_state()
+
+    def add_pending_buy_order(self, order_id: str, pair: str, quantity: float, sigma_level: float = None):
+        """Record a pending BUY LIMIT order for reconciliation on fill."""
+        self.pending_buy_orders[order_id] = {
+            'pair': pair,
+            'quantity': quantity,
+            'sigma_level': sigma_level,
+        }
+        log.info(f"Recorded pending buy order {order_id}: {pair} x{quantity:.8f}")
+        self.save_state()
+
+    def remove_pending_buy_order(self, order_id: str):
+        """Remove a pending order (after fill, cancel, or rejection)."""
+        if order_id in self.pending_buy_orders:
+            order_data = self.pending_buy_orders.pop(order_id)
+            log.info(f"Removed pending buy order {order_id}: {order_data['pair']}")
+            self.save_state()
+        else:
+            log.debug(f"Pending order {order_id} not found (may already be removed)")
+
+    def get_pending_buy_order(self, order_id: str) -> dict:
+        """Retrieve a pending order by ID."""
+        return self.pending_buy_orders.get(order_id)

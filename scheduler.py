@@ -60,6 +60,94 @@ def calculate_spread_aware_limit_price(
     return limit_price
 
 
+def reconcile_pending_buy_orders(
+    client: RoostooClient, 
+    pm: PortfolioManager, 
+    portfolio: dict,
+    trade_logger: TradeLogger,
+):
+    """Check status of pending BUY orders and record entries if filled.
+    
+    Called at the beginning of each signal loop cycle to reconcile any 
+    orders that may have filled offline/asynchronously. Only handles
+    BUY orders that fill; does NOT handle market SLs or dust sells.
+    
+    Args:
+        client: API client for querying order status
+        pm: Portfolio manager
+        portfolio: Current portfolio state (with balances, prices, etc.)
+        trade_logger: Logger for trade events
+    """
+    if not pm.pending_buy_orders:
+        return
+    
+    log.info(f"Reconciling {len(pm.pending_buy_orders)} pending buy orders...")
+    
+    # Check status of each pending order
+    for order_id, order_data in list(pm.pending_buy_orders.items()):
+        result = client.query_order(order_id=int(order_id))
+        
+        if not result or not result.get("Success"):
+            log.warning(f"Failed to query order {order_id}, will retry next cycle")
+            continue
+        
+        orders = result.get("OrderMatched", [])
+        if not orders:
+            log.warning(f"Order {order_id} not found in query result, may be rejected")
+            pm.remove_pending_buy_order(order_id)
+            continue
+        
+        order = orders[0]
+        status = order.get("Status", "")
+        pair = order_data.get("pair", "")
+        coin = pair.split("/")[0] if pair else ""
+        
+        if status == "FILLED":
+            # Order filled! Record the entry with actual filled price
+            filled_price = float(order.get("FilledAverPrice", 0))
+            filled_qty = float(order.get("FilledQuantity", order_data.get("quantity", 0)))
+            current_qty = portfolio.get("balances", {}).get(coin, 0)
+            sigma_level = order_data.get("sigma_level")
+            
+            pm.record_entry(coin, filled_qty, filled_price, current_qty, sigma_level=sigma_level)
+            
+            trade_logger.log(
+                asset=pair,
+                action="BUY",
+                order_type="LIMIT",
+                quantity=filled_qty,
+                price=filled_price,
+                order_id=str(order_id),
+                status="FILLED",
+                reason="Pending order filled (reconciliation)",
+                portfolio_value=portfolio.get("total_value", 0),
+            )
+            
+            pm.remove_pending_buy_order(order_id)
+            log.info(f"Order {order_id} ({pair}): FILLED at {filled_price:.2f}")
+        
+        elif status in ["CANCELED", "REJECTED"]:
+            # Order no longer active, remove from tracking
+            trade_logger.log(
+                asset=pair,
+                action="CANCEL",
+                order_id=str(order_id),
+                status=status,
+                reason=f"Pending order {status.lower()} (reconciliation)",
+                portfolio_value=portfolio.get("total_value", 0),
+            )
+            
+            pm.remove_pending_buy_order(order_id)
+            log.info(f"Order {order_id} ({pair}): {status}")
+        
+        else:
+            # Still PENDING, will retry next cycle
+            log.debug(f"Order {order_id} ({pair}): still {status}")
+
+
+
+
+
 def cancel_stale_orders(client: RoostooClient, trade_logger: TradeLogger, portfolio_value: float):
     """Cancel any pending orders older than STALE_ORDER_HOURS."""
     import time
@@ -259,6 +347,10 @@ def _signal_loop_inner(
 
     total_value = portfolio["total_value"]
 
+    # ══ STEP B: Reconcile pending buy orders at the very beginning ══
+    # Check any orders placed in previous cycles that may have filled offline
+    reconcile_pending_buy_orders(client, pm, portfolio, trade_logger)
+
     # Check max drawdown halt
     if rm.check_max_drawdown(total_value):
         log.critical("MAX DRAWDOWN — all trading halted")
@@ -370,12 +462,20 @@ def _signal_loop_inner(
                     reason=buy_reason,
                     portfolio_value=total_value,
                 )
-                # Record entry if filled immediately
-                if detail.get("Status") == "FILLED":
+                
+                # Step A: Log pending order if not filled immediately
+                order_status = detail.get("Status", "")
+                order_id = str(detail.get("OrderID", ""))
+                
+                if order_status == "FILLED":
                     filled_price = detail.get("FilledAverPrice", limit_price)
                     current_qty = portfolio["balances"].get(coin, 0)
                     # FIX 1: sigma_level is now correctly defined above
                     pm.record_entry(coin, quantity, filled_price, current_qty, sigma_level=sigma_level)
+                
+                elif order_status == "PENDING":
+                    # Order placed but not filled yet — track it for reconciliation
+                    pm.add_pending_buy_order(order_id, pair, quantity, sigma_level=sigma_level)
 
                 # Reserve cash for the order so later BUYs in this loop can't overdraft.
                 available_usd = max(0.0, available_usd - (quantity * limit_price))

@@ -350,8 +350,17 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
     # 3. STANDARD EXIT: Mean Reversion (Take Profit)
     if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
         
+        # STRICT PROFIT GATE: Must have a known entry price to exit (fail-safe against loss-locking)
+        if entry_price is None:
+            log.warning(
+                f"{pair}: SELL signal BLOCKED — entry_price is None. "
+                f"Cannot execute standard exit without knowing entry point. "
+                f"Waiting for pending order reconciliation or re-entry."
+            )
+            return "HOLD", metadata
+        
         # Optional: Profit Gate (Only take profit if price is above entry)
-        if entry_price and current_price <= entry_price:
+        if current_price <= entry_price:
             log.info(
                 f"{pair}: SELL signal suppressed by Profit Gate — "
                 f"current={current_price:.4f} is not yet above entry={entry_price:.4f}"
