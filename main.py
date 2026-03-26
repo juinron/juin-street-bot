@@ -59,8 +59,7 @@ def main():
     scheduler.start()
     log.info(
         "Scheduler started — signal loop every "
-        f"{config.SIGNAL_LOOP_MINUTES}m, rebalance daily at "
-        f"{config.DAILY_REBALANCE_HOUR:02d}:00 UTC"
+        f"{config.SIGNAL_LOOP_MINUTES}m"
     )
 
     # Graceful shutdown handler (guarded against double-trigger)

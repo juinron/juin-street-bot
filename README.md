@@ -12,14 +12,6 @@ The bot trades **6 crypto pairs** (BTC, ETH, SOL, BNB, XRP, LINK against USD) on
 4. **SELL signal**: price rises above upper band + RSI > 60 (overbought) + holding position
 5. **Orders**: Limit orders placed just inside the spread (±0.1% from current price)
 
-### Daily Rebalance (09:00 UTC)
-Manages **existing positions only** to stay near the **16% target allocation**:
-- **Trim winners**: Sells assets over-allocated (taking profit)
-- **Top up losers**: Buys assets under-allocated (but only if already held)
-- **No new entries**: The rebalancer **cannot** initiate new positions from 0% baseline — all entries are strictly handled by the signal loop
-
-This prevents the rebalancer from "catching falling knives" and ensures the strategy controls trade entry timing. Drifts >±3% trigger rebalancing.
-
 ### Risk Management
 | Guard | Trigger | Action |
 |---|---|---|
