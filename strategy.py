@@ -157,7 +157,7 @@ def compute_trend_sma(prices: pd.Series, period: int = None) -> pd.Series:
     return prices.rolling(window=period).mean()
 
 
-def compute_signal(pair: str, held_assets: set) -> tuple:
+def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tuple:
     """Evaluate dynamic signal using Bollinger Bands, RSI Z-Score, ATR, and trend filter.
 
     Returns: (signal, metadata_dict)
@@ -182,6 +182,7 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
         1. RSI Z-score > RSI_Z_THRESHOLD   (overbought)
         2. Price > BB SMA                  (above mean)
         3. Coin is held
+        4. Current price > entry_price     (Profit Gate — only sell if in profit)
     """
     df = load_price_history(pair)
 
@@ -278,9 +279,19 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
         )
 
     # ── SELL Logic ──
+    # Requires: overbought Z-RSI + price above BB SMA + coin is held
     if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
         if not is_held:
             log.info(f"{pair}: SELL signal suppressed — position below dust threshold")
+            return "HOLD", metadata
+
+        # NEW: Profit Gate
+        # Only sell on an overbought signal if we are actually in profit
+        if entry_price and current_price <= entry_price:
+            log.info(
+                f"{pair}: SELL signal SUPPRESSED (Avoid Loss) — "
+                f"current={current_price:.4f} <= entry={entry_price:.4f}"
+            )
             return "HOLD", metadata
 
         log.info(

@@ -290,7 +290,12 @@ def _signal_loop_inner(
     available_usd = max(0.0, portfolio["usd_cash"] - (total_value * config.CASH_BUFFER_PCT))
     for pair in config.ASSETS:
         coin = pair.split("/")[0]
-        signal, metadata = compute_signal(pair, portfolio["held_assets"])
+        
+        # NEW: Retrieve entry price for this coin from the Portfolio Manager
+        entry_price = pm.entry_prices.get(coin)
+        
+        # Pass the entry_price to the compute_signal function
+        signal, metadata = compute_signal(pair, portfolio["held_assets"], entry_price=entry_price)
 
         # FIX 1: Extract sigma_level from metadata before use
         sigma_level = metadata.get("sigma_level")
