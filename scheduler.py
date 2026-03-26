@@ -390,6 +390,15 @@ def _signal_loop_inner(
             if quantity <= 0:
                 continue
 
+            # Guard: if position is at a loss, let stop-loss manage it instead
+            entry_price = pm.entry_prices.get(coin)
+            if entry_price and price < entry_price:
+                log.info(
+                    f"{pair}: SELL signal suppressed — current price {price:.4f} is below entry "
+                    f"{entry_price:.4f}, letting stop-loss manage this position"
+                )
+                continue
+
             rules = pair_rules.get(pair, {})
             price_precision = rules.get("price_precision", 4)
             amount_precision = rules.get("amount_precision", 6)
