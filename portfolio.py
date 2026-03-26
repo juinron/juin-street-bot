@@ -254,66 +254,6 @@ class PortfolioManager:
             pair=pair, price=price, portfolio=portfolio, available_usd=available_usd,
         )
 
-    def calculate_rebalance_trades(self, portfolio: dict) -> list:
-        trades = []
-        total = portfolio["total_value"]
-        if total <= 0:
-            return trades
-
-        min_cash = total * config.CASH_BUFFER_PCT
-        available_cash = portfolio["usd_cash"] - min_cash
-
-        for pair in config.ASSETS:
-            target_pct = config.SIGNAL_SIZES.get(pair, 0)
-            if target_pct <= 0:
-                continue
-
-            actual_pct = self.get_allocation_pct(pair, portfolio)
-            drift = actual_pct - target_pct
-
-            if abs(drift) < config.REBALANCE_DRIFT_PCT:
-                continue
-
-            price = portfolio["prices"].get(pair, 0)
-            if price <= 0:
-                continue
-
-            coin = pair.split("/")[0]
-            drift_usd = drift * total
-
-            if coin not in portfolio.get("held_assets", set()) and drift < 0:
-                continue
-
-            if drift > 0:
-                sell_qty = drift_usd / price
-                if sell_qty > 0:
-                    trades.append({
-                        "pair": pair,
-                        "side": "SELL",
-                        "quantity": sell_qty,
-                        "price": price * config.SELL_LIMIT_OFFSET,
-                        "reason": f"Rebalance: {actual_pct:.1%} → {target_pct:.1%}",
-                    })
-            else:
-                buy_usd = abs(drift_usd)
-                if available_cash <= 0:
-                    continue
-
-                spend_used = min(buy_usd, available_cash)
-                available_cash -= spend_used
-
-                buy_qty = spend_used / price if price > 0 else 0
-                if buy_qty > 0 and spend_used > 0:
-                    trades.append({
-                        "pair": pair,
-                        "side": "BUY",
-                        "quantity": buy_qty,
-                        "price": price * config.BUY_LIMIT_OFFSET,
-                        "reason": f"Rebalance: {actual_pct:.1%} → {target_pct:.1%}",
-                    })
-
-        return trades
-
     def record_entry(self, coin: str, new_qty: float, new_price: float, current_qty: float, sigma_level: float = None):
         """Record entry price after a buy is filled, using weighted average price."""
         old_price = self.entry_prices.get(coin, 0)

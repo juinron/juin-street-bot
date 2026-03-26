@@ -35,7 +35,6 @@ TREND_SMA_PERIOD = 50
 
 # Portfolio allocation (Tiered Fixed-Fractional Sizing)
 CASH_BUFFER_PCT = 0.10        # keep 10% in USD for aggressive buy cycles
-REBALANCE_DRIFT_PCT = 0.03    # rebalance if >3% off allocation
 MAX_ASSET_ALLOCATION_PCT = 0.20  # never exceed 20% allocation in single asset
 
 # Fixed fractional buy sizing by asset risk tier
@@ -62,7 +61,6 @@ MAKER_SPREAD_TICKS = 1             # submit buy at (max_bid + 1 tick), sell at (
 
 # Scheduling
 SIGNAL_LOOP_MINUTES = 5      # run signal loop every 5 minutes
-DAILY_REBALANCE_HOUR = 9      # rebalance at 09:00 UTC
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
 # Order pricing offsets (DEPRECATED — now using spread-aware execution)

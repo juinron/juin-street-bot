@@ -441,97 +441,6 @@ def _signal_loop_inner(
     log.info("=" * 60)
 
 
-def daily_rebalance(
-    client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
-    trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
-):
-    """Daily rebalance at 09:00 UTC — trim/top-up positions to target allocation."""
-    if not _trading_lock.acquire(blocking=False):
-        log.warning("Daily rebalance skipped — another trading job is running")
-        return
-    try:
-        _daily_rebalance_inner(client, pm, rm, trade_logger, portfolio_logger)
-    except Exception as e:
-        log.error(f"Daily rebalance failed with unexpected error: {e}", exc_info=True)
-    finally:
-        _trading_lock.release()
-
-
-def _daily_rebalance_inner(
-    client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
-    trade_logger: TradeLogger, portfolio_logger: PortfolioLogger,
-):
-    """Inner rebalance logic, called with trading lock held."""
-    log.info("Daily rebalance starting")
-
-    portfolio = pm.fetch_portfolio(client)
-    if not portfolio:
-        log.error("Could not fetch portfolio for rebalance")
-        return
-
-    if rm.check_max_drawdown(portfolio["total_value"]):
-        log.critical("MAX DRAWDOWN — rebalance skipped")
-        return
-
-    trades = pm.calculate_rebalance_trades(portfolio)
-    pair_rules = pm.get_pair_rules(client)
-
-    for trade in trades:
-        pair = trade["pair"]
-        side = trade["side"]
-        rules = pair_rules.get(pair, {})
-        price_precision = rules.get("price_precision", 4)
-        amount_precision = rules.get("amount_precision", 6)
-        quantity = pm.floor_to_precision(trade["quantity"], int(amount_precision))
-        price = pm.floor_to_precision(trade["price"], int(price_precision))
-
-        if quantity <= 0:
-            continue
-
-        mini_order = float(rules.get("mini_order", 0) or 0)
-        if price <= 0 or (mini_order and (quantity * price) < mini_order):
-            continue
-
-        # Respect risk gates for buys
-        if side == "BUY" and not rm.can_buy(portfolio["total_value"]):
-            log.info(f"Rebalance BUY for {pair} blocked by risk gate")
-            continue
-
-        result = client.place_order(
-            pair,
-            side,
-            quantity,
-            price=price,
-            order_type="LIMIT",
-        )
-        if result and result.get("Success"):
-            detail = result.get("OrderDetail", {})
-            trade_logger.log(
-                asset=pair, action=side, order_type="LIMIT",
-                quantity=quantity, price=price,
-                order_id=str(detail.get("OrderID", "")),
-                status=detail.get("Status", ""),
-                reason=trade["reason"],
-                portfolio_value=portfolio["total_value"],
-            )
-            coin = pair.split("/")[0]
-            if side == "BUY" and detail.get("Status") == "FILLED":
-                current_qty = portfolio["balances"].get(coin, 0)
-                pm.record_entry(coin, quantity, detail.get("FilledAverPrice", price), current_qty)
-            elif side == "SELL" and detail.get("Status") == "FILLED":
-                pm.clear_entry(coin)
-        else:
-            trade_logger.log(
-                asset=pair, action="ERROR",
-                reason=f"Rebalance {side} order failed",
-                portfolio_value=portfolio["total_value"],
-            )
-
-    _log_snapshot(pm, rm, portfolio, portfolio_logger)
-    pm.save_state()
-    log.info("Daily rebalance complete")
-
-
 def midnight_reset(
     client: RoostooClient, pm: PortfolioManager, rm: RiskManager,
     portfolio_logger: PortfolioLogger,
@@ -581,19 +490,7 @@ def create_scheduler(
         max_instances=1,
     )
 
-    # Job 2: Daily rebalance at 09:00 UTC
-    scheduler.add_job(
-        daily_rebalance,
-        "cron",
-        hour=config.DAILY_REBALANCE_HOUR,
-        minute=0,
-        args=[client, pm, rm, trade_logger, portfolio_logger],
-        id="daily_rebalance",
-        name="Daily Rebalance",
-        max_instances=1,
-    )
-
-    # Job 3: Midnight reset at 00:00 UTC
+    # Job 2: Midnight reset at 00:00 UTC
     scheduler.add_job(
         midnight_reset,
         "cron",
