@@ -1,4 +1,12 @@
-"""Strategy — Bollinger Bands + RSI signal generation with price history collection."""
+"""Strategy module: price history collection + signal generation.
+
+This module stores recent prices to CSV, computes indicators (BB, RSI, ATR, trend SMA),
+and decides BUY/SELL/HOLD for each asset by combining:
+  - Bollinger Bands mean reversion (price vs SMA)
+  - RSI extremes with Z-score filtering
+  - Trend direction filter (price > long-term SMA)
+  - Optional profit gate on SELL (only exit winners)
+"""
 
 import os
 import csv
@@ -192,31 +200,22 @@ def compute_trend_sma(prices: pd.Series, period: int = None) -> pd.Series:
 
 
 def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tuple:
-    """Evaluate dynamic signal using Bollinger Bands, RSI Z-Score, ATR, and trend filter.
+    """Evaluate a signal for a pair using indicators from history.
 
-    Returns: (signal, metadata_dict)
-    signal: 'BUY', 'SELL', or 'HOLD'
-    metadata_dict: {
-        'rsi_zscore': float,
-        'atr': float,
-        'sigma_level': float or None,
-        'bb_upper': float,
-        'bb_lower': float,
-        'bb_sma': float,
-        'trend_sma': float,       # FIX 4: added
-        'trend_filter_pass': bool, # FIX 4: added — True if price is above trend SMA
-    }
+    Strategy summary:
+      - Uses Bollinger Bands (BB), RSI and RSI Z-Score, ATR, trend SMA filter.
+      - BUY when the market is oversold, price is below BB mid, and the trend is up.
+      - SELL when the market is overbought, price is above BB mid, position is held, and profit gate passes.
+      - HOLD in all other cases (including not ready, insufficient data, or filtered conditions).
 
-    BUY conditions (ALL must be true):
-        1. RSI Z-score < -RSI_Z_THRESHOLD  (oversold)
-        2. Price < BB SMA                  (below mean)
-        3. Price > trend SMA               (FIX 4: uptrend filter — avoids catching falling knives)
+    Returns:
+      tuple(str, dict) -> (signal, metadata):
+        signal is one of 'BUY', 'SELL', 'HOLD'.
+        metadata includes indicator values for logging and risk management.
 
-    SELL conditions (ALL must be true):
-        1. RSI Z-score > RSI_Z_THRESHOLD   (overbought)
-        2. Price > BB SMA                  (above mean)
-        3. Coin is held
-        4. Current price > entry_price     (Profit Gate — only sell if in profit)
+    Key conditions implemented in code:
+      - buy: rsi_z < -RSI_Z_THRESHOLD AND price < bb_sma AND price > trend_sma
+      - sell: rsi_z > RSI_Z_THRESHOLD AND price > bb_sma AND coin is held AND price > entry_price
     """
     df = load_price_history(pair)
 
@@ -274,8 +273,10 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         log.info(f"{pair}: indicators not ready, holding")
         return "HOLD", {}
 
-    # FIX 4: trend filter — True means price is in an uptrend
-    trend_filter_pass = current_price > current_trend_sma
+    # FIX 4: trend filter with buffer — smoother decision based on short-term vs long-term trend
+    trend_buffer = getattr(config, 'TREND_FILTER_BUFFER', 0.01)
+    trend_filter_threshold = current_trend_sma * (1 - trend_buffer)
+    trend_filter_pass = current_sma > trend_filter_threshold
 
     metadata = {
         'rsi_zscore': float(current_rsi_z),
