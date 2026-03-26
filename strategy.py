@@ -261,12 +261,9 @@ def compute_signal(pair: str, held_assets: set) -> tuple:
 
     # ── BUY Logic ──
     # Trigger BUY when RSI Z-score indicates oversold (Z < -threshold)
-    # and price is below SMA (accumulation zone)
+    # and price is below SMA (accumulation zone).
+    # Buys are allowed for both new and held positions (up to MAX_ASSET_ALLOCATION_PCT).
     if current_rsi_z < -config.RSI_Z_THRESHOLD and current_price < current_sma:
-        if is_held:
-            log.info(f"{pair}: BUY signal suppressed — existing position held (use tranche logic in scheduler)")
-            return "HOLD", metadata
-        
         # Calculate sigma level for this price deviation
         # Used for tranche buying: different quantities at different price levels
         if current_sma > 0:
