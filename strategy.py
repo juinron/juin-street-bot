@@ -295,17 +295,6 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         f"RSI={current_rsi:.1f} RSI_Z={current_rsi_z:.2f} ATR={current_atr:.4f}"
     )
 
-    coin = pair.split("/")[0]
-    is_held = coin in held_assets
-
-    # ── SELL RISK CONTROL (stop-loss) ──
-    # If we are already holding and price falls below entry - ATR_MULTIPLIER * ATR, force sell.
-    if is_held and entry_price is not None:
-        stop_loss_price = entry_price - (current_atr * config.ATR_MULTIPLIER)
-        if current_price < stop_loss_price:
-            log.warning(f"{pair}: STOP-LOSS TRIGGERED at {current_price:.4f} < {stop_loss_price:.4f}")
-            return "SELL", metadata
-
     # ── BUY Logic ──
     # Requires: oversold Z-RSI + price below BB SMA + price above trend SMA (FIX 4)
     if (
@@ -337,24 +326,41 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         )
 
     # ── SELL Logic ──
-    # Requires: overbought Z-RSI + price above BB SMA + coin is held
-    if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
-        if not is_held:
-            log.info(f"{pair}: SELL signal suppressed — position below dust threshold")
-            return "HOLD", metadata
+    # 1. Verification: Only evaluate SELL logic if we actually hold the coin
+    coin = pair.split("/")[0]
+    is_held = coin in held_assets
 
-        # NEW: Profit Gate
-        # Only sell on an overbought signal if we are actually in profit
+    if not is_held:
+        return "HOLD", metadata
+
+    # 2. EMERGENCY EXIT: ATR-Based Stop-Loss
+    # This triggers regardless of the "Profit Gate" to prevent catastrophic losses.
+    if entry_price:
+        # stop_loss = entry - (3.5 * volatility)
+        stop_loss_price = entry_price - (current_atr * config.ATR_MULTIPLIER)
+        
+        if current_price < stop_loss_price:
+            log.warning(
+                f"{pair}: SELL SIGNAL (STOP-LOSS) — "
+                f"Price {current_price:.4f} < Stop {stop_loss_price:.4f} "
+                f"(Entry: {entry_price:.4f}, ATR: {current_atr:.4f})"
+            )
+            return "SELL", metadata
+
+    # 3. STANDARD EXIT: Mean Reversion (Take Profit)
+    if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
+        
+        # Optional: Profit Gate (Only take profit if price is above entry)
         if entry_price and current_price <= entry_price:
             log.info(
-                f"{pair}: SELL signal SUPPRESSED (Avoid Loss) — "
-                f"current={current_price:.4f} <= entry={entry_price:.4f}"
+                f"{pair}: SELL signal suppressed by Profit Gate — "
+                f"current={current_price:.4f} is not yet above entry={entry_price:.4f}"
             )
             return "HOLD", metadata
 
         log.info(
-            f"{pair}: SELL signal — Z_RSI={current_rsi_z:.2f} (> {config.RSI_Z_THRESHOLD}) "
-            f"price={current_price:.4f} SMA={current_sma:.4f}"
+            f"{pair}: SELL signal (Take Profit) — Z_RSI={current_rsi_z:.2f} "
+            f"price={current_price:.4f} > SMA={current_sma:.4f}"
         )
         return "SELL", metadata
 
