@@ -27,8 +27,8 @@ ATR_PERIOD = 14             # rolling window for ATR calculation
 ATR_MULTIPLIER = 3.5        # stop-loss at entry_price - (k * ATR)
 
 # Volatility-adjusted RSI thresholds (replaces static RSI_OVERSOLD/OVERBOUGHT)
-RSI_Z_PERIOD = 20           # rolling window for RSI mean/std calculation
-RSI_Z_THRESHOLD = 2.0       # trigger signal when |Z_RSI| > threshold (2 sigma deviation)
+RSI_Z_PERIOD = 40           # rolling window for RSI mean/std calculation
+RSI_Z_THRESHOLD = 1.7       # trigger signal when |Z_RSI| > threshold (2 sigma deviation)
 
 # FIX 4: Trend filter — only BUY when price is above this SMA (avoids catching falling knives)
 TREND_SMA_PERIOD = 50
