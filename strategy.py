@@ -200,66 +200,38 @@ def compute_trend_sma(prices: pd.Series, period: int = None) -> pd.Series:
 
 
 def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tuple:
-    """Evaluate a signal for a pair using indicators from history.
+    """Evaluate a signal for a pair using 15-minute resampled history.
 
-    Strategy summary:
-      - Uses Bollinger Bands (BB), RSI and RSI Z-Score, ATR, trend SMA filter.
-      - BUY when the market is oversold, price is below BB mid, and the trend is up.
-      - SELL when the market is overbought, price is above BB mid, position is held, and profit gate passes.
-      - HOLD in all other cases (including not ready, insufficient data, or filtered conditions).
-
-    Returns:
-      tuple(str, dict) -> (signal, metadata):
-        signal is one of 'BUY', 'SELL', 'HOLD'.
-        metadata includes indicator values for logging and risk management.
-
-    Key conditions implemented in code:
-      - buy: rsi_z < -RSI_Z_THRESHOLD AND price < bb_sma AND price > trend_sma
-      - sell: rsi_z > RSI_Z_THRESHOLD AND price > bb_sma AND coin is held AND price > entry_price
+    Refactored to ensure indicator alignment and reduce signal noise.
     """
-    df = load_price_history(pair)
+    # 1. Load and resample EVERYTHING to 15m immediately
+    # This aligns the price action for RSI, SMA, and ATR automatically
+    df = load_price_history_resampled(pair, interval="15min")
 
-    # Need enough data for all indicators including trend SMA
+    # 2. Safety check: Need enough data for the longest window (Trend SMA)
     min_period = max(
         config.BB_PERIOD, config.RSI_PERIOD,
         config.RSI_Z_PERIOD, config.ATR_PERIOD,
         config.TREND_SMA_PERIOD,
     )
+    
     if len(df) < min_period:
-        log.info(f"{pair}: insufficient data ({len(df)}/{min_period}), holding")
+        log.info(f"{pair}: insufficient 15m data ({len(df)}/{min_period}), holding")
         return "HOLD", {}
 
-    df = df.tail(max(200, config.TREND_SMA_PERIOD + 50)).copy()
+    # 3. Extract OHLC equivalents from the resampled dataframe
     close = df["last_price"].astype(float)
     high = df["max_bid"].astype(float)
     low = df["min_ask"].astype(float)
 
-    if high.abs().sum() < 1e-10:
-        high = close
-    if low.abs().sum() < 1e-10:
-        low = close
-
+    # 4. Compute all indicators on the same 15m time-series
     upper, lower, sma = compute_bollinger_bands(close)
     rsi = compute_rsi(close)
     rsi_zscore = compute_rsi_zscore(rsi)
-    trend_sma = compute_trend_sma(close)  # FIX 4
-    
-    # Compute ATR from 15-minute resampled data to reduce noise sensitivity
-    df_atr = load_price_history_resampled(pair, interval="15min")
-    if len(df_atr) >= config.ATR_PERIOD:
-        close_atr = df_atr["last_price"].astype(float)
-        high_atr = df_atr["max_bid"].astype(float)
-        low_atr = df_atr["min_ask"].astype(float)
-        
-        if high_atr.abs().sum() < 1e-10:
-            high_atr = close_atr
-        if low_atr.abs().sum() < 1e-10:
-            low_atr = close_atr
-        
-        atr = compute_atr(high_atr, low_atr, close_atr)
-    else:
-        atr = pd.Series(np.nan, index=close.index)
+    trend_sma = compute_trend_sma(close)
+    atr = compute_atr(high, low, close)
 
+    # 5. Get the most recent values for logic evaluation
     current_price = close.iloc[-1]
     current_upper = upper.iloc[-1]
     current_lower = lower.iloc[-1]
@@ -267,13 +239,14 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
     current_rsi = rsi.iloc[-1]
     current_rsi_z = rsi_zscore.iloc[-1]
     current_atr = atr.iloc[-1]
-    current_trend_sma = trend_sma.iloc[-1]  # FIX 4
+    current_trend_sma = trend_sma.iloc[-1]
 
+    # Stop if indicators aren't ready (prevents errors during initial bootstrap)
     if pd.isna(current_upper) or pd.isna(current_rsi_z) or pd.isna(current_atr) or pd.isna(current_trend_sma):
-        log.info(f"{pair}: indicators not ready, holding")
+        log.info(f"{pair}: indicators not ready (NaN found), holding")
         return "HOLD", {}
 
-    # FIX 4: trend filter with buffer — smoother decision based on short-term vs long-term trend
+    # 6. Trend Filter Logic
     trend_buffer = getattr(config, 'TREND_FILTER_BUFFER', 0.01)
     trend_filter_threshold = current_trend_sma * (1 - trend_buffer)
     trend_filter_pass = current_sma > trend_filter_threshold
@@ -285,92 +258,49 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         'bb_lower': float(current_lower),
         'bb_sma': float(current_sma),
         'sigma_level': None,
-        'trend_sma': float(current_trend_sma),         # FIX 4
-        'trend_filter_pass': bool(trend_filter_pass),  # FIX 4
+        'trend_sma': float(current_trend_sma),
+        'trend_filter_pass': bool(trend_filter_pass),
     }
 
     log.info(
-        f"{pair}: price={current_price:.4f} SMA={current_sma:.4f} "
+        f"{pair}: [15m] price={current_price:.4f} SMA={current_sma:.4f} "
         f"TrendSMA={current_trend_sma:.4f} trend_pass={trend_filter_pass} "
         f"RSI={current_rsi:.1f} RSI_Z={current_rsi_z:.2f} ATR={current_atr:.4f}"
     )
 
     # ── BUY Logic ──
-    # Requires: oversold Z-RSI + price below BB SMA + price above trend SMA (FIX 4)
+    # Condition: Oversold Z-RSI + Price < Mid-BB + Strong Uptrend
     if (
         current_rsi_z < -config.RSI_Z_THRESHOLD
         and current_price < current_sma
-        and trend_filter_pass  # FIX 4: only buy in uptrends
+        and trend_filter_pass
     ):
-        if current_sma > 0:
-            std_dev = (current_sma - current_lower) / config.BB_STD_DEV if config.BB_STD_DEV > 0 else 1
-            if std_dev > 0:
-                sigma_level = (current_sma - current_price) / std_dev
-                metadata['sigma_level'] = float(sigma_level)
+        # Calculate how many standard deviations the price is from the mean
+        std_dev = (current_sma - current_lower) / config.BB_STD_DEV if config.BB_STD_DEV > 0 else 1
+        if std_dev > 0:
+            sigma_level = (current_sma - current_price) / std_dev
+            metadata['sigma_level'] = float(sigma_level)
 
-        log.info(
-            f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD}) "
-            f"price={current_price:.4f} SMA={current_sma:.4f} TrendSMA={current_trend_sma:.4f}"
-        )
+        log.info(f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD})")
         return "BUY", metadata
 
-    # Log when trend filter blocked a BUY signal (useful for tuning)
-    if (
-        current_rsi_z < -config.RSI_Z_THRESHOLD
-        and current_price < current_sma
-        and not trend_filter_pass
-    ):
-        log.info(
-            f"{pair}: BUY signal SUPPRESSED by trend filter — "
-            f"price={current_price:.4f} below TrendSMA={current_trend_sma:.4f}"
-        )
-
     # ── SELL Logic ──
-    # 1. Verification: Only evaluate SELL logic if we actually hold the coin
     coin = pair.split("/")[0]
-    is_held = coin in held_assets
+    if coin in held_assets:
+        # A. EMERGENCY EXIT: ATR-Based Stop-Loss
+        if entry_price:
+            stop_loss_price = entry_price - (current_atr * config.ATR_MULTIPLIER)
+            if current_price < stop_loss_price:
+                log.warning(f"{pair}: STOP-LOSS TRIGGERED at {current_price:.4f}")
+                return "SELL", metadata
 
-    if not is_held:
-        return "HOLD", metadata
-
-    # 2. EMERGENCY EXIT: ATR-Based Stop-Loss
-    # This triggers regardless of the "Profit Gate" to prevent catastrophic losses.
-    if entry_price:
-        # stop_loss = entry - (3.5 * volatility)
-        stop_loss_price = entry_price - (current_atr * config.ATR_MULTIPLIER)
-        
-        if current_price < stop_loss_price:
-            log.warning(
-                f"{pair}: SELL SIGNAL (STOP-LOSS) — "
-                f"Price {current_price:.4f} < Stop {stop_loss_price:.4f} "
-                f"(Entry: {entry_price:.4f}, ATR: {current_atr:.4f})"
-            )
-            return "SELL", metadata
-
-    # 3. STANDARD EXIT: Mean Reversion (Take Profit)
-    if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
-        
-        # STRICT PROFIT GATE: Must have a known entry price to exit (fail-safe against loss-locking)
-        if entry_price is None:
-            log.warning(
-                f"{pair}: SELL signal BLOCKED — entry_price is None. "
-                f"Cannot execute standard exit without knowing entry point. "
-                f"Waiting for pending order reconciliation or re-entry."
-            )
-            return "HOLD", metadata
-        
-        # Optional: Profit Gate (Only take profit if price is above entry)
-        if current_price <= entry_price:
-            log.info(
-                f"{pair}: SELL signal suppressed by Profit Gate — "
-                f"current={current_price:.4f} is not yet above entry={entry_price:.4f}"
-            )
-            return "HOLD", metadata
-
-        log.info(
-            f"{pair}: SELL signal (Take Profit) — Z_RSI={current_rsi_z:.2f} "
-            f"price={current_price:.4f} > SMA={current_sma:.4f}"
-        )
-        return "SELL", metadata
+        # B. STANDARD EXIT: Overbought Mean Reversion
+        # Only exits if price > SMA and we are in profit (Profit Gate)
+        if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
+            if entry_price and current_price > entry_price:
+                log.info(f"{pair}: TAKE PROFIT signal — Z_RSI={current_rsi_z:.2f}")
+                return "SELL", metadata
+            else:
+                log.info(f"{pair}: SELL signal blocked by profit gate.")
 
     return "HOLD", metadata

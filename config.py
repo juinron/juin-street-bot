@@ -28,7 +28,7 @@ ATR_MULTIPLIER = 3        # stop-loss at entry_price - (k * ATR)
 
 # Volatility-adjusted RSI thresholds (replaces static RSI_OVERSOLD/OVERBOUGHT)
 RSI_Z_PERIOD = 20           # rolling window for RSI mean/std calculation
-RSI_Z_THRESHOLD = 1.8       # trigger signal when |Z_RSI| > threshold (1.6 sigma deviation)
+RSI_Z_THRESHOLD = 1.5       # trigger signal when |Z_RSI| > threshold (1.6 sigma deviation)
 
 # FIX 4: Trend filter — only BUY when price is above this SMA (avoids catching falling knives)
 TREND_SMA_PERIOD = 200
@@ -59,7 +59,7 @@ STOP_LOSS_COOLDOWN_MINUTES = 30    # no buys for 30 minutes after stop-loss trig
 MAKER_SPREAD_TICKS = 1             # submit buy at (max_bid + 1 tick), sell at (min_ask - 1 tick)
 
 # Scheduling
-SIGNAL_LOOP_MINUTES = 5      # run signal loop every 5 minutes
+SIGNAL_LOOP_MINUTES = 15      # run signal loop every 5 minutes
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
 # Order pricing offsets (DEPRECATED — now using spread-aware execution)
@@ -72,9 +72,9 @@ RETRY_DELAY_SECONDS = 5
 
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
-CANDLE_INTERVAL = "5m"
+CANDLE_INTERVAL = "15m"
 ATR_CANDLE_INTERVAL = "15m"  # ATR uses 15-minute buckets to reduce noise sensitivity
-CANDLE_BOOTSTRAP_COUNT = 200
+CANDLE_BOOTSTRAP_COUNT = 250
 
 # Map Roostoo pairs → Binance symbols
 BINANCE_SYMBOL_MAP = {
