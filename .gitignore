@@ -1,5 +1,6 @@
 .env
-*.csv
+price_history.csv
+portfolio_snapshots.csv
 explanation.md
 state.json
 
