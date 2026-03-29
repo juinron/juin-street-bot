@@ -4,7 +4,7 @@ import time
 import hmac
 import hashlib
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 import requests
 from functools import wraps
@@ -42,7 +42,7 @@ class RoostooClient:
     def _timestamp(self) -> str:
         return str(int(time.time() * 1000))
 
-    def _sign(self, params: dict) -> Tuple[dict, dict, str]:
+    def _sign(self, params: dict) -> tuple[dict, dict, str]:
         """Sign params with HMAC-SHA256. Returns (headers, params, total_params_string)."""
         params["timestamp"] = self._timestamp()
         sorted_keys = sorted(params.keys())

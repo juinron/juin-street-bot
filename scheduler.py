@@ -1,7 +1,10 @@
-"""Scheduler — APScheduler jobs for signal loop, daily rebalance, and midnight reset."""
+"""Scheduler — APScheduler jobs for signal loop and midnight reset."""
 
 import logging
+import time
 import threading
+
+import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import config
@@ -9,8 +12,8 @@ from api_client import RoostooClient
 from portfolio import PortfolioManager
 from risk_manager import RiskManager
 from strategy import (
-    collect_price_snapshot, compute_signal, load_price_history,
-    load_price_history_resampled, compute_atr, compute_rsi_zscore, compute_rsi, compute_bollinger_bands
+    collect_price_snapshot, compute_signal,
+    load_price_history_resampled, compute_atr,
 )
 from logger import TradeLogger, PortfolioLogger
 
@@ -132,11 +135,8 @@ def reconcile_pending_buy_orders(
 
 
 
-
-
 def cancel_stale_orders(client: RoostooClient, trade_logger: TradeLogger, portfolio_value: float):
     """Cancel any pending orders older than STALE_ORDER_HOURS."""
-    import time
     result = client.query_order(pending_only=True)
     if not result or not result.get("Success"):
         return
@@ -183,7 +183,6 @@ def execute_stop_losses(
         atr = None
 
         if len(df_atr) >= config.ATR_PERIOD:
-            import pandas as pd
             close = df_atr["last_price"].astype(float)
             high = df_atr["max_bid"].astype(float)
             low = df_atr["min_ask"].astype(float)

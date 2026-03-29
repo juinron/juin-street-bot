@@ -20,50 +20,28 @@ class RiskManager:
         self.last_stop_loss_price = {}  # {coin: price} — track stop-loss exit price for recovery gate
 
     def check_stop_loss(self, coin: str, current_price: float, atr: float = None) -> bool:
-        """Returns True if stop-loss triggered.
-        
-        Dynamic ATR-based stop-loss:
-        stop_loss_price = entry_price - (ATR_MULTIPLIER * atr)
-        
-        Args:
-            coin: Asset identifier (e.g., 'BTC')
-            current_price: Current market price
-            atr: Current ATR value (if None, fallback to 4% legacy mode)
-        
-        Returns:
-            True if current_price <= stop_loss_price
-        """
+        """Returns True if stop-loss triggered (ATR-based, or legacy 4% fallback)."""
         entry = self.pm.entry_prices.get(coin)
         if entry is None or entry <= 0:
             return False
 
-        # If ATR provided, use dynamic stop-loss
         if atr is not None and atr > 0:
             stop_loss_price = entry - (config.ATR_MULTIPLIER * atr)
-            if current_price <= stop_loss_price:
-                loss_pct = (entry - current_price) / entry
-                log.warning(
-                    f"STOP-LOSS triggered for {coin}: "
-                    f"entry={entry:.2f} current={current_price:.2f} "
-                    f"atr={atr:.4f} stop_level={stop_loss_price:.2f} loss={loss_pct:.2%}"
-                )
-                # Record stop-loss timestamp and price for cooldown + recovery gate
-                self.last_stop_loss_time[coin] = time.time()
-                self.last_stop_loss_price[coin] = current_price
-                return True
+            triggered = current_price <= stop_loss_price
+            mode = f"atr={atr:.4f} stop_level={stop_loss_price:.2f}"
         else:
-            # Fallback to legacy 4% stop-loss if ATR not available
-            # (for backward compatibility during transition)
+            triggered = (entry - current_price) / entry >= 0.04
+            mode = "legacy 4%"
+
+        if triggered:
             loss_pct = (entry - current_price) / entry
-            if loss_pct >= 0.04:
-                log.warning(
-                    f"STOP-LOSS triggered for {coin} (legacy 4% mode): "
-                    f"entry={entry:.2f} current={current_price:.2f} loss={loss_pct:.2%}"
-                )
-                # Record stop-loss timestamp and price for cooldown + recovery gate
-                self.last_stop_loss_time[coin] = time.time()
-                self.last_stop_loss_price[coin] = current_price
-                return True
+            log.warning(
+                f"STOP-LOSS triggered for {coin} ({mode}): "
+                f"entry={entry:.2f} current={current_price:.2f} loss={loss_pct:.2%}"
+            )
+            self.last_stop_loss_time[coin] = time.time()
+            self.last_stop_loss_price[coin] = current_price
+            return True
 
         return False
 
@@ -138,7 +116,7 @@ class RiskManager:
 
         # Gate 2: Price recovery — price must be above stop level + recovery margin
         stop_price = self.last_stop_loss_price.get(coin)
-        recovery_pct = getattr(config, 'STOP_LOSS_RECOVERY_PCT', 0.01)
+        recovery_pct = config.STOP_LOSS_RECOVERY_PCT
         if stop_price and current_price and current_price < stop_price * (1 + recovery_pct):
             log.info(
                 f"{coin}: stop-loss cooldown expired but price {current_price:.4f} "

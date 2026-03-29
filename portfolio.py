@@ -6,7 +6,6 @@ import logging
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
-from typing import Tuple
 
 import config
 
@@ -193,12 +192,6 @@ class PortfolioManager:
 
         return candidates
 
-    def get_allocation_pct(self, pair: str, portfolio: dict) -> float:
-        total = portfolio.get("total_value", 0)
-        if total <= 0:
-            return 0
-        return portfolio.get("asset_values", {}).get(pair, 0) / total
-
     def calculate_tiered_fixed_quantity(
         self,
         pair: str,
@@ -257,17 +250,6 @@ class PortfolioManager:
 
         quantity = spend_used / price
         return quantity, spend_used
-
-    def calculate_buy_quantity(
-        self,
-        pair: str,
-        price: float,
-        portfolio: dict,
-        available_usd: float = None,
-    ) -> Tuple[float, float]:
-        return self.calculate_tiered_fixed_quantity(
-            pair=pair, price=price, portfolio=portfolio, available_usd=available_usd,
-        )
 
     def record_entry(self, coin: str, new_qty: float, new_price: float, current_qty: float, sigma_level: float = None):
         """Record entry price after a buy is filled, using weighted average price."""
@@ -328,7 +310,3 @@ class PortfolioManager:
             self.save_state()
         else:
             log.debug(f"Pending order {order_id} not found (may already be removed)")
-
-    def get_pending_buy_order(self, order_id: str) -> dict:
-        """Retrieve a pending order by ID."""
-        return self.pending_buy_orders.get(order_id)

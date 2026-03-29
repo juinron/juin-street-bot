@@ -243,8 +243,7 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         return "HOLD", {}
 
     # 6. Trend Filter Logic
-    trend_buffer = getattr(config, 'TREND_FILTER_BUFFER', 0.01)
-    trend_filter_threshold = current_trend_sma * (1 - trend_buffer)
+    trend_filter_threshold = current_trend_sma * (1 - config.TREND_FILTER_BUFFER)
     trend_filter_pass = current_price > trend_filter_threshold
 
     metadata = {
@@ -280,18 +279,9 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         log.info(f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD})")
         return "BUY", metadata
 
-    # ── SELL Logic ──
+    # ── SELL Logic (take-profit only; stop-losses are handled by execute_stop_losses) ──
     coin = pair.split("/")[0]
     if coin in held_assets:
-        # A. EMERGENCY EXIT: ATR-Based Stop-Loss
-        if entry_price:
-            stop_loss_price = entry_price - (current_atr * config.ATR_MULTIPLIER)
-            if current_price < stop_loss_price:
-                log.warning(f"{pair}: STOP-LOSS TRIGGERED at {current_price:.4f}")
-                return "SELL", metadata
-
-        # B. STANDARD EXIT: Overbought Mean Reversion
-        # Only exits if price > SMA and we are in profit (Profit Gate)
         if current_rsi_z > config.RSI_Z_THRESHOLD and current_price > current_sma:
             if entry_price and current_price > entry_price:
                 log.info(f"{pair}: TAKE PROFIT signal — Z_RSI={current_rsi_z:.2f}")

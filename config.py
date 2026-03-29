@@ -19,20 +19,18 @@ BB_STD_DEV = 2.0
 
 # RSI parameters
 RSI_PERIOD = 14
-RSI_OVERSOLD = 40
-RSI_OVERBOUGHT = 60
 
-# Dynamic ATR-based risk management (replaces static STOP_LOSS_PCT)
-ATR_PERIOD = 14             # rolling window for ATR calculation
-ATR_MULTIPLIER = 6        # stop-loss at entry_price - (k * ATR); widened from 3 to reduce whipsaw on 15m ATR
+# ATR-based risk management
+ATR_PERIOD = 14
+ATR_MULTIPLIER = 6
 
-# Volatility-adjusted RSI thresholds (replaces static RSI_OVERSOLD/OVERBOUGHT)
-RSI_Z_PERIOD = 20           # rolling window for RSI mean/std calculation
-RSI_Z_THRESHOLD = 1.5       # trigger signal when |Z_RSI| > threshold (1.5 sigma deviation)
+# RSI Z-score thresholds
+RSI_Z_PERIOD = 20
+RSI_Z_THRESHOLD = 1.5
 
-# FIX 4: Trend filter — only BUY when price is above this SMA (avoids catching falling knives)
+# Trend filter — only BUY when price is above this SMA
 TREND_SMA_PERIOD = 200
-TREND_FILTER_BUFFER = 0.02    # allow buys within 1% below trend SMA to avoid small dip rejections
+TREND_FILTER_BUFFER = 0.02    # allow buys within 2% below trend SMA
 
 # Portfolio allocation (Tiered Fixed-Fractional Sizing)
 CASH_BUFFER_PCT = 0.10        # keep 10% in USD for aggressive buy cycles
@@ -66,10 +64,6 @@ MAKER_SPREAD_TICKS = 1             # submit buy at (max_bid + 1 tick), sell at (
 SIGNAL_LOOP_MINUTES = 15      # run signal loop every 15 minutes
 STALE_ORDER_HOURS = 2         # cancel unfilled orders older than 2 hours
 
-# Order pricing offsets (DEPRECATED — now using spread-aware execution)
-BUY_LIMIT_OFFSET = 1.001
-SELL_LIMIT_OFFSET = 1.001
-
 # API retry settings
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 5
@@ -77,7 +71,6 @@ RETRY_DELAY_SECONDS = 5
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
 CANDLE_INTERVAL = "15m"
-ATR_CANDLE_INTERVAL = "15m"  # ATR uses 15-minute buckets to reduce noise sensitivity
 CANDLE_BOOTSTRAP_COUNT = 250
 
 # Map Roostoo pairs → Binance symbols
