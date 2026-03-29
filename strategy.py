@@ -249,7 +249,7 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
     # 6. Trend Filter Logic
     trend_buffer = getattr(config, 'TREND_FILTER_BUFFER', 0.01)
     trend_filter_threshold = current_trend_sma * (1 - trend_buffer)
-    trend_filter_pass = current_sma > trend_filter_threshold
+    trend_filter_pass = current_price > trend_filter_threshold
 
     metadata = {
         'rsi_zscore': float(current_rsi_z),

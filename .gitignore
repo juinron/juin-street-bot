@@ -1,6 +1,5 @@
 .env
-price_history.csv
-portfolio_snapshots.csv
+*.csv
 explanation.md
 state.json
 
