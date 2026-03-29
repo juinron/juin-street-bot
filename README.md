@@ -1,55 +1,68 @@
-# Juin Street Bot 🤖📈
+# Juin Street Bot
 
-An autonomous Python trading bot for the [Roostoo](https://roostoo.com) mock exchange. Uses a **Bollinger Bands mean-reversion strategy** with RSI confirmation, forced daily rebalancing, and comprehensive risk management.
+An autonomous Python trading bot for the [Roostoo](https://roostoo.com) mock exchange. Runs a **mean-reversion strategy** on 9 crypto pairs using Bollinger Bands, RSI Z-score, and a long-term trend filter.
 
 ## Strategy
 
-The bot trades **6 crypto pairs** (BTC, ETH, SOL, BNB, XRP, LINK against USD) on a **15-minute loop**:
+The bot trades **BTC, ETH, SOL, BNB, XRP, LINK, FET, TAO, ADA** against USD on a **15-minute loop**:
 
-1. **Fetch market data** via Roostoo ticker API and build local price history
-2. **Calculate Bollinger Bands** (20-period SMA ± 2 std devs) and **RSI** (14-period)
-3. **BUY signal**: price drops below lower band + RSI < 40 (oversold) + no existing position
-4. **SELL signal**: price rises above upper band + RSI > 60 (overbought) + holding position
-5. **Orders**: Limit orders placed just inside the spread (±0.1% from current price)
+1. **Bootstrap** historical candle data from Binance on startup
+2. **Collect** live ticker prices each cycle and append to local price history
+3. **Resample** raw ticks to 15-minute candles for indicator calculation
+4. **Evaluate** BUY/SELL/HOLD for each pair using:
+   - **RSI Z-score**: signals when RSI deviates > 1.5σ from its 20-period rolling mean
+   - **Bollinger Bands** (20-period SMA ± 2 std devs): confirms price is below mid for buys
+   - **Trend filter** (200-period SMA): blocks buys when price is below the long-term trend
+   - **ATR stop-loss**: exits a position if price falls > 6× ATR below entry
+5. **Size** orders using tiered fixed-fractional allocation (5–10% per signal, 20% max per asset)
+6. **Execute** limit orders quoted inside the bid-ask spread (maker execution)
+
+### Signal Logic
+
+| Signal | Conditions |
+|---|---|
+| **BUY** | RSI Z-score < −1.5 AND price < BB mid AND price > 200-SMA (trend filter) |
+| **TAKE PROFIT** | RSI Z-score > +1.5 AND price > BB mid AND price > entry price |
+| **STOP-LOSS** | price < entry − (6 × ATR) |
 
 ### Risk Management
+
 | Guard | Trigger | Action |
 |---|---|---|
-| **Stop-loss** | Position drops 4% from entry | Immediate market sell |
-| **Circuit breaker** | Portfolio down 10% from start | Pause all buys (sells still execute) |
-| **Daily loss limit** | Down 5% vs yesterday's close | No new buys until midnight UTC reset |
-| **Max drawdown** | 15% below peak portfolio value | Halt all trading, await manual restart |
+| **ATR stop-loss** | Price falls > 6× 15m ATR below entry | Immediate market sell |
+| **Stop-loss cooldown** | After any stop-loss exit | Block re-entry for 4 hours AND until price recovers 1% above stop level |
+| **Circuit breaker** | Portfolio down 10% from starting value | Pause all buys |
+| **Daily loss limit** | Down 5% vs yesterday's close | No new buys until midnight UTC |
+| **Max drawdown halt** | 15% below portfolio peak | Halt all trading; manual restart required |
 
-## Log Files
+## Files
 
 | File | Description |
 |---|---|
-| `trades_log.csv` | Every trade, cancellation, and error with timestamps and reasons |
-| `portfolio_snapshots.csv` | Portfolio value breakdown every 30 minutes + daily |
-| `price_history.csv` | Ticker prices collected each loop (feeds strategy calculations) |
-| `state.json` | Persisted bot state (entry prices, peak value) for crash recovery |
-
-### `trades_log.csv` columns
-`timestamp, asset, action, order_type, quantity, price, order_id, status, reason, portfolio_value_at_time`
-
-### `portfolio_snapshots.csv` columns
-`timestamp, total_value_usd, btc_value, eth_value, sol_value, bnb_value, usd_cash, daily_return_pct, drawdown_from_peak_pct`
+| `trades_log.csv` | Every trade, cancellation, and error with timestamps |
+| `portfolio_snapshots.csv` | Portfolio value snapshot every 15 minutes |
+| `price_history.csv` | Raw ticker prices collected each loop |
+| `state.json` | Persisted state (entry prices, peak value) for crash recovery |
 
 ## Configuration
 
-All tunable parameters are in [`config.py`](config.py) — adjust without touching strategy logic:
+All tunable parameters are in [`config.py`](config.py):
 
-| Parameter | Default | Description |
+| Parameter | Value | Description |
 |---|---|---|
 | `BB_PERIOD` | 20 | Bollinger Band lookback window |
-| `BB_STD_DEV` | 2.0 | Standard deviation multiplier |
+| `BB_STD_DEV` | 2.0 | Band width in standard deviations |
 | `RSI_PERIOD` | 14 | RSI calculation period |
-| `RSI_OVERSOLD` | 40 | RSI threshold for buy signal |
-| `RSI_OVERBOUGHT` | 60 | RSI threshold for sell signal |
-| `TARGET_ALLOCATION_PCT` | 16% | Target allocation per asset |
-| `CASH_BUFFER_PCT` | 4% | Minimum USD cash reserve |
-| `STOP_LOSS_PCT` | 4% | Per-trade stop-loss threshold |
-| `SIGNAL_LOOP_MINUTES` | 30 | Minutes between signal evaluations |
+| `RSI_Z_PERIOD` | 20 | Rolling window for RSI Z-score |
+| `RSI_Z_THRESHOLD` | 1.5 | Signal threshold (σ from mean RSI) |
+| `TREND_SMA_PERIOD` | 200 | Long-term trend filter SMA period |
+| `ATR_PERIOD` | 14 | ATR lookback window |
+| `ATR_MULTIPLIER` | 6 | Stop-loss distance in ATR units |
+| `CASH_BUFFER_PCT` | 10% | Minimum USD cash reserve |
+| `MAX_ASSET_ALLOCATION_PCT` | 20% | Max allocation per asset |
+| `STOP_LOSS_COOLDOWN_MINUTES` | 240 | Re-entry lockout after a stop-loss |
+| `STOP_LOSS_RECOVERY_PCT` | 1% | Price must recover this much above stop before re-entry |
+| `SIGNAL_LOOP_MINUTES` | 15 | Minutes between signal evaluations |
 
 ## Architecture
 
@@ -57,7 +70,7 @@ All tunable parameters are in [`config.py`](config.py) — adjust without touchi
 main.py           → Entry point, initializes & starts scheduler
 ├── config.py     → Environment variables & constants
 ├── api_client.py → Roostoo API calls with HMAC signing & retries
-├── strategy.py   → Bollinger Bands + RSI signal engine
+├── strategy.py   → BB + RSI Z-score + trend filter signal engine
 ├── portfolio.py  → Position tracking & allocation calculations
 ├── risk_manager.py → Stop-loss, circuit breaker, drawdown guards
 ├── scheduler.py  → APScheduler job definitions & orchestration

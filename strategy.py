@@ -190,11 +190,7 @@ def compute_rsi_zscore(rsi: pd.Series, period: int = None) -> pd.Series:
 
 
 def compute_trend_sma(prices: pd.Series, period: int = None) -> pd.Series:
-    """Calculate a long-period SMA used as a trend filter.
-    
-    FIX 4: Added trend filter to prevent buying into downtrends.
-    Period defaults to config.TREND_SMA_PERIOD (50 by default).
-    """
+    """Calculate a long-period SMA used as a trend filter."""
     period = period or config.TREND_SMA_PERIOD
     return prices.rolling(window=period).mean()
 

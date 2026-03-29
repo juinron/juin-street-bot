@@ -300,11 +300,7 @@ class PortfolioManager:
         self.save_state()
 
     def clear_entry(self, coin: str):
-        """Remove all position state after selling.
-        
-        FIX 3: also clears position_quantities and tranche_allocations to prevent
-        stale data from corrupting weighted average price on re-entry.
-        """
+        """Remove all position state after selling."""
         self.entry_prices.pop(coin, None)
         self.position_quantities.pop(coin, None)
         self.tranche_allocations.pop(coin, None)

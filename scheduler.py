@@ -61,23 +61,12 @@ def calculate_spread_aware_limit_price(
 
 
 def reconcile_pending_buy_orders(
-    client: RoostooClient, 
-    pm: PortfolioManager, 
+    client: RoostooClient,
+    pm: PortfolioManager,
     portfolio: dict,
     trade_logger: TradeLogger,
 ):
-    """Check status of pending BUY orders and record entries if filled.
-    
-    Called at the beginning of each signal loop cycle to reconcile any 
-    orders that may have filled offline/asynchronously. Only handles
-    BUY orders that fill; does NOT handle market SLs or dust sells.
-    
-    Args:
-        client: API client for querying order status
-        pm: Portfolio manager
-        portfolio: Current portfolio state (with balances, prices, etc.)
-        trade_logger: Logger for trade events
-    """
+    """Check status of pending BUY limit orders and record entries for any that filled."""
     if not pm.pending_buy_orders:
         return
     
@@ -103,7 +92,6 @@ def reconcile_pending_buy_orders(
         coin = pair.split("/")[0] if pair else ""
         
         if status == "FILLED":
-            # Order filled! Record the entry with actual filled price
             filled_price = float(order.get("FilledAverPrice", 0))
             filled_qty = float(order.get("FilledQuantity", order_data.get("quantity", 0)))
             current_qty = portfolio.get("balances", {}).get(coin, 0)
@@ -127,7 +115,6 @@ def reconcile_pending_buy_orders(
             log.info(f"Order {order_id} ({pair}): FILLED at {filled_price:.2f}")
         
         elif status in ["CANCELED", "REJECTED"]:
-            # Order no longer active, remove from tracking
             trade_logger.log(
                 asset=pair,
                 action="CANCEL",
@@ -141,7 +128,6 @@ def reconcile_pending_buy_orders(
             log.info(f"Order {order_id} ({pair}): {status}")
         
         else:
-            # Still PENDING, will retry next cycle
             log.debug(f"Order {order_id} ({pair}): still {status}")
 
 
@@ -193,30 +179,26 @@ def execute_stop_losses(
         if coin not in portfolio["held_assets"] or price <= 0:
             continue
 
-        # Compute ATR for this asset to use in dynamic stop-loss check
-        # Use 15-minute resampled data to reduce noise sensitivity
         df_atr = load_price_history_resampled(pair, interval="15min")
         atr = None
-        
+
         if len(df_atr) >= config.ATR_PERIOD:
             import pandas as pd
             close = df_atr["last_price"].astype(float)
             high = df_atr["max_bid"].astype(float)
             low = df_atr["min_ask"].astype(float)
-            
-            # Fallback if bid/ask unavailable
+
+            # Fall back to close if bid/ask columns are empty
             if high.abs().sum() < 1e-10:
                 high = close
             if low.abs().sum() < 1e-10:
                 low = close
-            
+
             atr_series = compute_atr(high, low, close)
             atr = atr_series.iloc[-1]
-            
             if pd.isna(atr):
                 atr = None
 
-        # Check stop-loss with ATR (dynamic) or fallback to legacy 4%
         if rm.check_stop_loss(coin, price, atr):
             quantity = portfolio["balances"].get(coin, 0)
             if quantity <= 0:
@@ -347,8 +329,7 @@ def _signal_loop_inner(
 
     total_value = portfolio["total_value"]
 
-    # ══ STEP B: Reconcile pending buy orders at the very beginning ══
-    # Check any orders placed in previous cycles that may have filled offline
+    # Reconcile orders placed in previous cycles that may have filled offline
     reconcile_pending_buy_orders(client, pm, portfolio, trade_logger)
 
     # Check max drawdown halt
@@ -383,13 +364,8 @@ def _signal_loop_inner(
     for pair in config.ASSETS:
         coin = pair.split("/")[0]
         
-        # NEW: Retrieve entry price for this coin from the Portfolio Manager
         entry_price = pm.entry_prices.get(coin)
-        
-        # Pass the entry_price to the compute_signal function
         signal, metadata = compute_signal(pair, portfolio["held_assets"], entry_price=entry_price)
-
-        # FIX 1: Extract sigma_level from metadata before use
         sigma_level = metadata.get("sigma_level")
 
         price = portfolio["prices"].get(pair, 0)
@@ -399,13 +375,12 @@ def _signal_loop_inner(
         if price <= 0:
             continue
 
-        # Fallback to current price if bid/ask not available
         if max_bid <= 0:
             max_bid = price
         if min_ask <= 0:
             min_ask = price
 
-        # Ensure we do not act on tiny dust positions that are flagged HOLD via strategy
+        # Skip SELL signals on dust positions (below DUST_THRESHOLD_USD)
         if signal == "SELL" and coin not in portfolio.get("held_assets", set()):
             log.info(f"{pair}: skipping SELL — coin not considered held (dust threshold)")
             continue
@@ -415,7 +390,6 @@ def _signal_loop_inner(
             price_precision = rules.get("price_precision", 4)
             amount_precision = rules.get("amount_precision", 6)
 
-            # Tiered fixed allocation buy
             buy_qty, spend_used = pm.calculate_tiered_fixed_quantity(
                 pair, price, portfolio, available_usd=available_usd
             )
@@ -424,7 +398,6 @@ def _signal_loop_inner(
             if buy_qty <= 0 or spend_used <= 0:
                 continue
 
-            # Spread-aware execution: quote inside the bid-ask spread
             limit_price = calculate_spread_aware_limit_price(
                 side="BUY",
                 mid_price=price,
@@ -439,7 +412,6 @@ def _signal_loop_inner(
             if limit_price <= 0 or quantity <= 0:
                 continue
 
-            # Ensure we don't violate the exchange minimum order value (if provided).
             mini_order = float(rules.get("mini_order", 0) or 0)
             if mini_order and (quantity * limit_price) < mini_order:
                 continue
@@ -463,21 +435,17 @@ def _signal_loop_inner(
                     portfolio_value=total_value,
                 )
                 
-                # Step A: Log pending order if not filled immediately
                 order_status = detail.get("Status", "")
                 order_id = str(detail.get("OrderID", ""))
-                
+
                 if order_status == "FILLED":
                     filled_price = detail.get("FilledAverPrice", limit_price)
                     current_qty = portfolio["balances"].get(coin, 0)
-                    # FIX 1: sigma_level is now correctly defined above
                     pm.record_entry(coin, quantity, filled_price, current_qty, sigma_level=sigma_level)
-                
                 elif order_status == "PENDING":
-                    # Order placed but not filled yet — track it for reconciliation
                     pm.add_pending_buy_order(order_id, pair, quantity, sigma_level=sigma_level)
 
-                # Reserve cash for the order so later BUYs in this loop can't overdraft.
+                # Reserve cash so later BUYs in this loop can't overdraft
                 available_usd = max(0.0, available_usd - (quantity * limit_price))
             else:
                 trade_logger.log(
@@ -490,20 +458,19 @@ def _signal_loop_inner(
             if quantity <= 0:
                 continue
 
-            # Guard: if position is at a loss, let stop-loss manage it instead
+            # If position is at a loss, let ATR stop-loss manage the exit
             entry_price = pm.entry_prices.get(coin)
             if entry_price and price < entry_price:
                 log.info(
-                    f"{pair}: SELL signal suppressed — current price {price:.4f} is below entry "
-                    f"{entry_price:.4f}, letting stop-loss manage this position"
+                    f"{pair}: SELL signal suppressed — price {price:.4f} below entry "
+                    f"{entry_price:.4f}, deferring to stop-loss"
                 )
                 continue
 
             rules = pair_rules.get(pair, {})
             price_precision = rules.get("price_precision", 4)
             amount_precision = rules.get("amount_precision", 6)
-            
-            # Spread-aware execution: quote inside the bid-ask spread
+
             limit_price = calculate_spread_aware_limit_price(
                 side="SELL",
                 mid_price=price,
@@ -593,7 +560,6 @@ def create_scheduler(
     """Create and configure the APScheduler with all jobs."""
     scheduler = BackgroundScheduler(timezone="UTC")
 
-    # Job 1: Signal loop every config.SIGNAL_LOOP_MINUTES minutes
     scheduler.add_job(
         signal_loop,
         "interval",
@@ -604,7 +570,7 @@ def create_scheduler(
         max_instances=1,
     )
 
-    # Job 2: Midnight reset at 00:00 UTC
+    # Midnight reset at 00:00 UTC
     scheduler.add_job(
         midnight_reset,
         "cron",
