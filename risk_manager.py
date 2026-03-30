@@ -16,8 +16,9 @@ class RiskManager:
         self.circuit_breaker_active = False
         self.daily_loss_active = False
         self.halted = False  # max drawdown halt
-        self.last_stop_loss_time = {}  # {coin: timestamp} — track when stop-loss was triggered
-        self.last_stop_loss_price = {}  # {coin: price} — track stop-loss exit price for recovery gate
+        # Restore stop-loss cooldown state from persisted state (survives restarts)
+        self.last_stop_loss_time = dict(self.pm.stop_loss_cooldown_times)
+        self.last_stop_loss_price = dict(self.pm.stop_loss_cooldown_prices)
 
     def check_stop_loss(self, coin: str, current_price: float, atr: float = None) -> bool:
         """Returns True if stop-loss triggered (ATR-based, or legacy 4% fallback)."""
@@ -41,6 +42,7 @@ class RiskManager:
             )
             self.last_stop_loss_time[coin] = time.time()
             self.last_stop_loss_price[coin] = current_price
+            self._sync_cooldown_to_state()
             return True
 
         return False
@@ -128,11 +130,14 @@ class RiskManager:
         # Both gates passed — clear records and allow re-entry
         del self.last_stop_loss_time[coin]
         self.last_stop_loss_price.pop(coin, None)
+        self._sync_cooldown_to_state()
         log.info(f"{coin}: stop-loss cooldown expired and price recovered, buys re-enabled")
         return False
 
     def check_max_drawdown(self, current_value: float) -> bool:
-        """Returns True if all trading should halt (>15% below peak)."""
+        """Returns True if new buys should halt (>15% below peak).
+        Automatically resumes when drawdown recovers below threshold.
+        """
         if self.pm.peak_value <= 0:
             return False
 
@@ -143,12 +148,25 @@ class RiskManager:
                 log.critical(
                     f"MAX DRAWDOWN HALT: {drawdown:.2%} below peak "
                     f"(peak=${self.pm.peak_value:.2f}, current=${current_value:.2f}). "
-                    f"All trading halted. Manual restart required."
+                    f"New buys halted — stop-losses remain active."
                 )
             self.halted = True
             return True
 
+        if self.halted:
+            log.info(
+                f"MAX DRAWDOWN recovered: {drawdown:.2%} below peak "
+                f"(< {config.MAX_DRAWDOWN_PCT:.0%} threshold). Buys re-enabled."
+            )
+            self.halted = False
+
         return False
+
+    def _sync_cooldown_to_state(self):
+        """Persist stop-loss cooldown data through PortfolioManager state."""
+        self.pm.stop_loss_cooldown_times = dict(self.last_stop_loss_time)
+        self.pm.stop_loss_cooldown_prices = dict(self.last_stop_loss_price)
+        self.pm.save_state()
 
     def can_buy(self, current_value: float, coin: str = None, current_price: float = None) -> bool:
         """Check all risk gates — returns True if buying is allowed.

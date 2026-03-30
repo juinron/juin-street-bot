@@ -38,13 +38,14 @@ class RoostooClient:
         self.api_key = api_key or config.API_KEY
         self.api_secret = api_secret or config.API_SECRET
         self.base_url = config.BASE_URL
+        self.session = requests.Session()
 
     def _timestamp(self) -> str:
         return str(int(time.time() * 1000))
 
     def _sign(self, params: dict) -> tuple[dict, dict, str]:
         """Sign params with HMAC-SHA256. Returns (headers, params, total_params_string)."""
-        params["timestamp"] = self._timestamp()
+        params = {**params, "timestamp": self._timestamp()}
         sorted_keys = sorted(params.keys())
         total_params = "&".join(f"{k}={params[k]}" for k in sorted_keys)
 
@@ -64,13 +65,13 @@ class RoostooClient:
 
     @retry
     def get_server_time(self) -> Optional[dict]:
-        res = requests.get(f"{self.base_url}/v3/serverTime", timeout=10)
+        res = self.session.get(f"{self.base_url}/v3/serverTime", timeout=10)
         res.raise_for_status()
         return res.json()
 
     @retry
     def get_exchange_info(self) -> Optional[dict]:
-        res = requests.get(f"{self.base_url}/v3/exchangeInfo", timeout=10)
+        res = self.session.get(f"{self.base_url}/v3/exchangeInfo", timeout=10)
         res.raise_for_status()
         return res.json()
 
@@ -80,7 +81,7 @@ class RoostooClient:
         params = {"timestamp": self._timestamp()}
         if pair:
             params["pair"] = pair
-        res = requests.get(f"{self.base_url}/v3/ticker", params=params, timeout=10)
+        res = self.session.get(f"{self.base_url}/v3/ticker", params=params, timeout=10)
         res.raise_for_status()
         return res.json()
 
@@ -104,7 +105,7 @@ class RoostooClient:
             "interval": interval,
             "limit": limit,
         }
-        res = requests.get(
+        res = self.session.get(
             f"{config.BINANCE_BASE_URL}/api/v3/klines",
             params=params,
             timeout=15,
@@ -130,7 +131,7 @@ class RoostooClient:
     @retry
     def get_balance(self) -> Optional[dict]:
         headers, params, _ = self._sign({})
-        res = requests.get(
+        res = self.session.get(
             f"{self.base_url}/v3/balance", headers=headers, params=params, timeout=10
         )
         res.raise_for_status()
@@ -139,7 +140,7 @@ class RoostooClient:
     @retry
     def get_pending_count(self) -> Optional[dict]:
         headers, params, _ = self._sign({})
-        res = requests.get(
+        res = self.session.get(
             f"{self.base_url}/v3/pending_count", headers=headers, params=params, timeout=10
         )
         res.raise_for_status()
@@ -166,7 +167,7 @@ class RoostooClient:
         headers, _, total_params = self._sign(payload)
         headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-        res = requests.post(
+        res = self.session.post(
             f"{self.base_url}/v3/place_order",
             headers=headers, data=total_params, timeout=10,
         )
@@ -190,7 +191,7 @@ class RoostooClient:
         headers, _, total_params = self._sign(payload)
         headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-        res = requests.post(
+        res = self.session.post(
             f"{self.base_url}/v3/query_order",
             headers=headers, data=total_params, timeout=10,
         )
@@ -209,7 +210,7 @@ class RoostooClient:
         headers, _, total_params = self._sign(payload)
         headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-        res = requests.post(
+        res = self.session.post(
             f"{self.base_url}/v3/cancel_order",
             headers=headers, data=total_params, timeout=10,
         )

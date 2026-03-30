@@ -326,12 +326,6 @@ def _signal_loop_inner(
     # Reconcile orders placed in previous cycles that may have filled offline
     reconcile_pending_buy_orders(client, pm, portfolio, trade_logger)
 
-    # Check max drawdown halt
-    if rm.check_max_drawdown(total_value):
-        log.critical("MAX DRAWDOWN — all trading halted")
-        _log_snapshot(pm, rm, portfolio, portfolio_logger)
-        return
-
     # Cancel stale orders
     cancel_stale_orders(client, trade_logger, total_value)
 
@@ -350,7 +344,7 @@ def _signal_loop_inner(
         return
     total_value = portfolio["total_value"]
 
-    # Execute stop-losses
+    # Execute stop-losses (always run, even during max drawdown — must be able to cut losses)
     execute_stop_losses(client, pm, rm, portfolio, trade_logger, pair_rules)
 
     # Re-fetch portfolio after any stop-loss sells
@@ -358,6 +352,13 @@ def _signal_loop_inner(
     if not portfolio:
         return
     total_value = portfolio["total_value"]
+
+    # Check max drawdown — halt new buys but stop-losses above have already run
+    if rm.check_max_drawdown(total_value):
+        log.critical("MAX DRAWDOWN — new buys halted, stop-losses still active")
+        _log_snapshot(pm, rm, portfolio, portfolio_logger)
+        pm.save_state()
+        return
 
     # Evaluate signals for each asset (shuffle to prevent cash allocation bias)
     available_usd = max(0.0, portfolio["usd_cash"] - (total_value * config.CASH_BUFFER_PCT))

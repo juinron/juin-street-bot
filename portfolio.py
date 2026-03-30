@@ -25,6 +25,8 @@ class PortfolioManager:
         self.position_quantities = {}
         self.tranche_allocations = {}
         self.pending_buy_orders = {}  # Maps order_id -> {'pair': str, 'quantity': float, 'sigma_level': float}
+        self.stop_loss_cooldown_times = {}   # {coin: timestamp} — persisted for RiskManager
+        self.stop_loss_cooldown_prices = {}  # {coin: price} — persisted for RiskManager
         self._load_state()
 
     def get_pair_rules(self, client, refresh_after_seconds: float = 3600) -> dict:
@@ -69,6 +71,8 @@ class PortfolioManager:
             self.position_quantities = state.get("position_quantities", {})
             self.tranche_allocations = state.get("tranche_allocations", {})
             self.pending_buy_orders = state.get("pending_buy_orders", {})
+            self.stop_loss_cooldown_times = state.get("stop_loss_cooldown_times", {})
+            self.stop_loss_cooldown_prices = state.get("stop_loss_cooldown_prices", {})
             log.info(f"State restored: peak={self.peak_value:.2f}, "
                      f"positions={list(self.entry_prices.keys())}, "
                      f"pending_orders={list(self.pending_buy_orders.keys())}")
@@ -84,6 +88,8 @@ class PortfolioManager:
             "position_quantities": self.position_quantities,
             "tranche_allocations": self.tranche_allocations,
             "pending_buy_orders": self.pending_buy_orders,
+            "stop_loss_cooldown_times": self.stop_loss_cooldown_times,
+            "stop_loss_cooldown_prices": self.stop_loss_cooldown_prices,
         }
         with open(config.STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)

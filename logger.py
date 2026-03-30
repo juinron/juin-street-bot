@@ -70,6 +70,26 @@ class PortfolioLogger:
         if not os.path.exists(self.filepath):
             with open(self.filepath, "w", newline="") as f:
                 csv.writer(f).writerow(self.COLUMNS)
+            return
+
+        # Check if existing header matches current ASSETS (e.g., after adding new pairs)
+        with open(self.filepath, "r", newline="") as f:
+            reader = csv.reader(f)
+            existing_header = next(reader, None)
+        if existing_header != self.COLUMNS:
+            logging.getLogger(__name__).warning(
+                "Portfolio CSV header mismatch — rewriting with updated columns"
+            )
+            rows = []
+            with open(self.filepath, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    new_row = [row.get(col, 0) for col in self.COLUMNS]
+                    rows.append(new_row)
+            with open(self.filepath, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(self.COLUMNS)
+                writer.writerows(rows)
 
     def log(
         self, total_value: float, asset_values: dict,

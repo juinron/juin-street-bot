@@ -22,7 +22,22 @@ log = logging.getLogger(__name__)
 
 
 def bootstrap_price_history(client) -> None:
-    """Fetch historical candles from Binance and seed price_history.csv."""
+    """Fetch historical candles from Binance and seed price_history.csv.
+
+    Skips bootstrap if the file already exists with sufficient data,
+    to avoid destroying live price snapshots accumulated between restarts.
+    """
+    if os.path.exists(config.PRICE_HISTORY_FILE):
+        try:
+            df = pd.read_csv(config.PRICE_HISTORY_FILE)
+            if len(df) >= config.CANDLE_BOOTSTRAP_COUNT:
+                log.info(
+                    f"Price history already has {len(df)} rows, skipping bootstrap"
+                )
+                return
+        except Exception:
+            pass  # corrupt/empty file — proceed with bootstrap
+
     log.info("Bootstrapping price history from Binance...")
 
     rows = []
