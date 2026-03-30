@@ -60,7 +60,7 @@ def bootstrap_price_history(client) -> None:
 
     with open(config.PRICE_HISTORY_FILE, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["timestamp", "pair", "last_price", "max_bid", "min_ask"])
+        writer.writerow(["timestamp", "pair", "last_price", "high", "low"])
         writer.writerows(rows)
 
     log.info(f"Price history bootstrapped: {len(rows)} total rows written")
@@ -80,16 +80,16 @@ def collect_price_snapshot(client) -> dict:
     with open(config.PRICE_HISTORY_FILE, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["timestamp", "pair", "last_price", "max_bid", "min_ask"])
+            writer.writerow(["timestamp", "pair", "last_price", "high", "low"])
 
         for pair in config.ASSETS:
             data = ticker_data.get("Data", {}).get(pair)
             if data:
                 last_price = data.get("LastPrice", 0)
-                max_bid = data.get("MaxBid", last_price)
-                min_ask = data.get("MinAsk", last_price)
                 prices[pair] = last_price
-                writer.writerow([now, pair, last_price, max_bid, min_ask])
+                # Live snapshots are point-in-time: no intra-interval H/L available.
+                # Store last_price for both so ATR relies on price-change-to-prior-close.
+                writer.writerow([now, pair, last_price, last_price, last_price])
 
     log.info(f"Price snapshot collected: {prices}")
     return prices
@@ -130,8 +130,8 @@ def load_price_history_resampled(pair: str, interval: str = "15min") -> pd.DataF
     # Resample: last() for close, max() for high, min() for low
     df_resampled = df.resample(interval).agg({
         "last_price": "last",
-        "max_bid": "max",
-        "min_ask": "min",
+        "high": "max",
+        "low": "min",
         "pair": "first",
     })
     
@@ -142,12 +142,12 @@ def load_price_history_resampled(pair: str, interval: str = "15min") -> pd.DataF
 
 
 def compute_bollinger_bands(prices: pd.Series) -> tuple:
-    """Calculate upper band, lower band, and SMA."""
+    """Calculate upper band, lower band, SMA, and rolling std."""
     sma = prices.rolling(window=config.BB_PERIOD).mean()
     std = prices.rolling(window=config.BB_PERIOD).std()
     upper = sma + config.BB_STD_DEV * std
     lower = sma - config.BB_STD_DEV * std
-    return upper, lower, sma
+    return upper, lower, sma, std
 
 
 def compute_rsi(prices: pd.Series, period: int = None) -> pd.Series:
@@ -157,8 +157,8 @@ def compute_rsi(prices: pd.Series, period: int = None) -> pd.Series:
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
 
-    avg_gain = gain.ewm(alpha=1 / period, min_periods=period).mean()
-    avg_loss = loss.ewm(alpha=1 / period, min_periods=period).mean()
+    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
 
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
@@ -217,11 +217,11 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
 
     # 3. Extract OHLC equivalents from the resampled dataframe
     close = df["last_price"].astype(float)
-    high = df["max_bid"].astype(float)
-    low = df["min_ask"].astype(float)
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
 
     # 4. Compute all indicators on the same 15m time-series
-    upper, lower, sma = compute_bollinger_bands(close)
+    upper, lower, sma, std = compute_bollinger_bands(close)
     rsi = compute_rsi(close)
     rsi_zscore = compute_rsi_zscore(rsi)
     trend_sma = compute_trend_sma(close)
@@ -232,6 +232,7 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
     current_upper = upper.iloc[-1]
     current_lower = lower.iloc[-1]
     current_sma = sma.iloc[-1]
+    current_std = std.iloc[-1]
     current_rsi = rsi.iloc[-1]
     current_rsi_z = rsi_zscore.iloc[-1]
     current_atr = atr.iloc[-1]
@@ -271,9 +272,8 @@ def compute_signal(pair: str, held_assets: set, entry_price: float = None) -> tu
         and trend_filter_pass
     ):
         # Calculate how many standard deviations the price is from the mean
-        std_dev = (current_sma - current_lower) / config.BB_STD_DEV if config.BB_STD_DEV > 0 else 1
-        if std_dev > 0:
-            sigma_level = (current_sma - current_price) / std_dev
+        if current_std > 0:
+            sigma_level = (current_sma - current_price) / current_std
             metadata['sigma_level'] = float(sigma_level)
 
         log.info(f"{pair}: BUY signal — Z_RSI={current_rsi_z:.2f} (< -{config.RSI_Z_THRESHOLD})")
