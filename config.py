@@ -73,7 +73,7 @@ RETRY_DELAY_SECONDS = 5
 # Binance public API for historical candle data (no auth required)
 BINANCE_BASE_URL = "https://data-api.binance.vision"
 CANDLE_INTERVAL = "15m"
-CANDLE_BOOTSTRAP_COUNT = 250
+CANDLE_BOOTSTRAP_COUNT = 350
 
 # Map Roostoo pairs → Binance symbols
 BINANCE_SYMBOL_MAP = {

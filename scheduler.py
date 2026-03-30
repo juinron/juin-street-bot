@@ -1,6 +1,7 @@
 """Scheduler — APScheduler jobs for signal loop and midnight reset."""
 
 import logging
+import random
 import time
 import threading
 
@@ -184,14 +185,8 @@ def execute_stop_losses(
 
         if len(df_atr) >= config.ATR_PERIOD:
             close = df_atr["last_price"].astype(float)
-            high = df_atr["max_bid"].astype(float)
-            low = df_atr["min_ask"].astype(float)
-
-            # Fall back to close if bid/ask columns are empty
-            if high.abs().sum() < 1e-10:
-                high = close
-            if low.abs().sum() < 1e-10:
-                low = close
+            high = df_atr["high"].astype(float)
+            low = df_atr["low"].astype(float)
 
             atr_series = compute_atr(high, low, close)
             atr = atr_series.iloc[-1]
@@ -349,7 +344,13 @@ def _signal_loop_inner(
     # Liquidate dust positions before main signal trading, to prevent accumulation
     liquidate_dust_positions(client, pm, portfolio, trade_logger, pair_rules)
 
-    # Execute stop-losses first
+    # Re-fetch portfolio after dust liquidation so stop-losses see accurate balances
+    portfolio = pm.fetch_portfolio(client)
+    if not portfolio:
+        return
+    total_value = portfolio["total_value"]
+
+    # Execute stop-losses
     execute_stop_losses(client, pm, rm, portfolio, trade_logger, pair_rules)
 
     # Re-fetch portfolio after any stop-loss sells
@@ -358,9 +359,11 @@ def _signal_loop_inner(
         return
     total_value = portfolio["total_value"]
 
-    # Evaluate signals for each asset
+    # Evaluate signals for each asset (shuffle to prevent cash allocation bias)
     available_usd = max(0.0, portfolio["usd_cash"] - (total_value * config.CASH_BUFFER_PCT))
-    for pair in config.ASSETS:
+    shuffled_assets = list(config.ASSETS)
+    random.shuffle(shuffled_assets)
+    for pair in shuffled_assets:
         coin = pair.split("/")[0]
         
         entry_price = pm.entry_prices.get(coin)
@@ -526,6 +529,9 @@ def midnight_reset(
     portfolio_logger: PortfolioLogger,
 ):
     """Midnight UTC — reset daily loss tracking and snapshot portfolio."""
+    if not _trading_lock.acquire(blocking=True, timeout=120):
+        log.warning("Midnight reset skipped — could not acquire trading lock within 120s")
+        return
     try:
         log.info("Midnight reset")
         portfolio = pm.fetch_portfolio(client)
@@ -535,6 +541,8 @@ def midnight_reset(
         rm.reset_daily()
     except Exception as e:
         log.error(f"Midnight reset failed: {e}", exc_info=True)
+    finally:
+        _trading_lock.release()
 
 
 def _log_snapshot(
