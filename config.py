@@ -11,7 +11,7 @@ API_SECRET = os.getenv("API_SECRET", "")
 BASE_URL = "https://mock-api.roostoo.com"
 
 # Traded pairs (Roostoo uses COIN/USD format)
-ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD", "FET/USD", "TAO/USD", "ADA/USD"]
+ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "LINK/USD", "FET/USD", "TAO/USD", "ADA/USD", "TRX/USD", "AVAX/USD"]
 
 # Bollinger Band parameters
 BB_PERIOD = 20
@@ -47,6 +47,8 @@ SIGNAL_SIZES = {
     "FET/USD": 0.05,
     "TAO/USD": 0.05,
     "ADA/USD": 0.05,
+    "TRX/USD": 0.05,
+    "AVAX/USD": 0.05,
 }
 
 # Risk management
@@ -84,6 +86,8 @@ BINANCE_SYMBOL_MAP = {
     "FET/USD": "FETUSDT",
     "TAO/USD": "TAOUSDT",
     "ADA/USD": "ADAUSDT",
+    "TRX/USD": "TRXUSDT",
+    "AVAX/USD": "AVAXUSDT",
 }
 
 # Dust handling / minimum tradable value
