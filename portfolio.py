@@ -3,6 +3,7 @@
 import json
 import os
 import logging
+import tempfile
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
@@ -80,6 +81,11 @@ class PortfolioManager:
             log.warning(f"Failed to load state: {e}")
 
     def save_state(self):
+        """Persist portfolio state to disk using an atomic write (temp file + rename).
+
+        Writing to a temp file first and then renaming ensures state.json is never
+        left in a partially-written/corrupt state if the process crashes mid-write.
+        """
         state = {
             "entry_prices": self.entry_prices,
             "starting_value": self.starting_value,
@@ -91,8 +97,18 @@ class PortfolioManager:
             "stop_loss_cooldown_times": self.stop_loss_cooldown_times,
             "stop_loss_cooldown_prices": self.stop_loss_cooldown_prices,
         }
-        with open(config.STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
+        state_dir = os.path.dirname(os.path.abspath(config.STATE_FILE)) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=state_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp_path, config.STATE_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def fetch_portfolio(self, client) -> dict:
         balance_data = client.get_balance()

@@ -41,10 +41,21 @@ class RoostooClient:
         self.session = requests.Session()
 
     def _timestamp(self) -> str:
+        """Return current UTC time in milliseconds as a string (required by Roostoo API)."""
         return str(int(time.time() * 1000))
 
     def _sign(self, params: dict) -> tuple[dict, dict, str]:
-        """Sign params with HMAC-SHA256. Returns (headers, params, total_params_string)."""
+        """Attach a timestamp, sort params, and sign with HMAC-SHA256.
+
+        Args:
+            params: Request payload dict (without timestamp).
+
+        Returns:
+            Tuple of (headers, signed_params, total_params_string) where
+            headers carry the API key and signature, signed_params includes
+            the injected timestamp, and total_params_string is the
+            canonicalized query string that was signed.
+        """
         params = {**params, "timestamp": self._timestamp()}
         sorted_keys = sorted(params.keys())
         total_params = "&".join(f"{k}={params[k]}" for k in sorted_keys)
@@ -65,12 +76,19 @@ class RoostooClient:
 
     @retry
     def get_server_time(self) -> Optional[dict]:
+        """Fetch the Roostoo server timestamp. Used to verify API connectivity on startup."""
         res = self.session.get(f"{self.base_url}/v3/serverTime", timeout=10)
         res.raise_for_status()
         return res.json()
 
     @retry
     def get_exchange_info(self) -> Optional[dict]:
+        """Fetch trading pair rules (price/amount precision, minimum order size).
+
+        Returns:
+            Dict with a 'TradePairs' key mapping pair symbols to their rules,
+            or None on failure.
+        """
         res = self.session.get(f"{self.base_url}/v3/exchangeInfo", timeout=10)
         res.raise_for_status()
         return res.json()
@@ -130,6 +148,12 @@ class RoostooClient:
 
     @retry
     def get_balance(self) -> Optional[dict]:
+        """Fetch account balances for all assets (signed request).
+
+        Returns:
+            Dict with a 'SpotWallet' key containing per-asset Free/Lock balances,
+            or None on failure.
+        """
         headers, params, _ = self._sign({})
         res = self.session.get(
             f"{self.base_url}/v3/balance", headers=headers, params=params, timeout=10
@@ -139,6 +163,7 @@ class RoostooClient:
 
     @retry
     def get_pending_count(self) -> Optional[dict]:
+        """Fetch the number of currently pending (unfilled) orders (signed request)."""
         headers, params, _ = self._sign({})
         res = self.session.get(
             f"{self.base_url}/v3/pending_count", headers=headers, params=params, timeout=10

@@ -194,7 +194,12 @@ class RiskManager:
         return True
 
     def can_sell(self) -> bool:
-        """Sells are always allowed (to cut losses) unless max drawdown halted."""
+        """Returns True if a signal-based take-profit SELL is permitted.
+
+        Note: ATR stop-losses in execute_stop_losses() bypass this gate and always
+        execute regardless of halt state, so positions can always be cut at the
+        stop level. This gate only applies to RSI Z-score take-profit exits.
+        """
         return not self.halted
 
     def get_drawdown_pct(self, current_value: float) -> float:
