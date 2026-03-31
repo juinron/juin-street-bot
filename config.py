@@ -22,11 +22,11 @@ RSI_PERIOD = 14
 
 # ATR-based risk management
 ATR_PERIOD = 14
-ATR_MULTIPLIER = 6
+ATR_MULTIPLIER = 3
 
 # RSI Z-score thresholds
 RSI_Z_PERIOD = 20
-RSI_Z_THRESHOLD = 1.5
+RSI_Z_THRESHOLD = 1.2
 
 # Trend filter — only BUY when price is above this SMA
 TREND_SMA_PERIOD = 200
@@ -38,8 +38,8 @@ MAX_ASSET_ALLOCATION_PCT = 0.20  # never exceed 20% allocation in single asset
 
 # Fixed fractional buy sizing by asset risk tier
 SIGNAL_SIZES = {
-    "BTC/USD": 0.1,
-    "ETH/USD": 0.1,
+    "BTC/USD": 0.05,
+    "ETH/USD": 0.05,
     "SOL/USD": 0.05,
     "BNB/USD": 0.05,
     "LINK/USD": 0.05,
