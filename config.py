@@ -50,7 +50,7 @@ CIRCUIT_BREAKER_PAUSE_PCT = 0.10   # pause buys if portfolio drops 10% from star
 CIRCUIT_BREAKER_RESUME_PCT = 0.08  # resume buys when within 8% of start
 DAILY_LOSS_LIMIT_PCT = 0.05        # no buys if down 5% vs yesterday close
 MAX_DRAWDOWN_PCT = 0.15            # halt all trading if 15% below peak
-STOP_LOSS_COOLDOWN_MINUTES = 240   # no buys for 4 hours after stop-loss triggered on an asset
+STOP_LOSS_COOLDOWN_MINUTES = 60   # no buys for 4 hours after stop-loss triggered on an asset
 STOP_LOSS_RECOVERY_PCT = 0.01     # after stop-loss, price must recover 1% above stop level before re-entry
 
 # Spread-aware order execution
