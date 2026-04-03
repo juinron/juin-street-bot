@@ -4,7 +4,7 @@ An autonomous Python trading bot for the [Roostoo](https://roostoo.com) mock exc
 
 ## Strategy
 
-The bot trades **BTC, ETH, SOL, BNB, LINK** against USD on a **15-minute loop**:
+The bot trades **BTC, ETH, SOL, BNB, ZEC** against USD on a **15-minute loop**:
 
 1. **Bootstrap** historical candle data from Binance on startup
 2. **Collect** live ticker prices each cycle and append to local price history
@@ -31,7 +31,7 @@ The bot trades **BTC, ETH, SOL, BNB, LINK** against USD on a **15-minute loop**:
 |---|---|---|
 | **ATR stop-loss** | Price falls > 3× 15m ATR below entry | Immediate market sell |
 | **Stop-loss cooldown** | After any stop-loss exit | Block re-entry for 4 hours AND until price recovers 1% above stop level |
-| **Circuit breaker** | Portfolio down 10% from starting value | Pause all buys |
+| **Circuit breaker** | Portfolio down 10% from starting value | Pause all buys; resume when within 8% of start |
 | **Daily loss limit** | Down 5% vs yesterday's close | No new buys until midnight UTC |
 | **Max drawdown halt** | 15% below portfolio peak | Halt all new trades (stop-losses still execute) |
 
@@ -91,7 +91,7 @@ All tunable parameters are in [`config.py`](config.py):
 | `ATR_MULTIPLIER` | 3 | Stop-loss distance in ATR units |
 | `CASH_BUFFER_PCT` | 10% | Minimum USD cash reserve |
 | `MAX_ASSET_ALLOCATION_PCT` | 20% | Max allocation per asset |
-| `STOP_LOSS_COOLDOWN_MINUTES` | 240 | Re-entry lockout after a stop-loss |
+| `STOP_LOSS_COOLDOWN_MINUTES` | 60 | Re-entry lockout after a stop-loss |
 | `STOP_LOSS_RECOVERY_PCT` | 1% | Price must recover this much above stop before re-entry |
 | `SIGNAL_LOOP_MINUTES` | 15 | Minutes between signal evaluations |
 
